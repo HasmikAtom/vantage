@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "vantage-desktop",
+  "outputfilename": "vantage-desktop",
+  "frontend:install": "echo no install needed (iteration 1)",
+  "frontend:build": "echo no build needed (iteration 1)",
+  "frontend:dev:watcher": "echo no watcher needed (iteration 1)",
+  "wailsjsdir": "./frontend",
+  "version": "1",
+  "author": {
+    "name": "Vantage"
+  },
+  "info": {
+    "productName": "Vantage",
+    "productVersion": "0.1.0",
+    "copyright": "",
+    "comments": "Vantage Dashboard — Wails desktop shell"
+  }
+}

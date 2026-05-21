@@ -1,0 +1,271 @@
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    gzip on;
+    gzip_types text/plain text/css text/javascript application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    # -----------------------------------------------------------------------
+    # Security headers (applied to every response — `always` makes them stick
+    # on error pages too).
+    #
+    # CSP rationale:
+    #   - default-src 'self': everything has to come from us unless an
+    #     explicit directive below carves out an exception. Tightens the
+    #     fallback for any directive we forget.
+    #   - script-src 'self' + sha256 of the inline theme-init: index.html
+    #     keeps one synchronous inline script in the head that applies the
+    #     dark/light class before React mounts (no-flash on first paint).
+    #     The hash pins THAT specific script body; if anyone edits the
+    #     IIFE in index.html, the hash here MUST be regenerated:
+    #         python3 -c 'import re,hashlib,base64;
+    #         s=re.search(r"<script>(.*?)</script>", open("index.html").read(), re.S).group(1);
+    #         print("sha256-"+base64.b64encode(hashlib.sha256(s.encode()).digest()).decode())'
+    #   - style-src 'self' 'unsafe-inline' fonts.googleapis.com: React uses
+    #     inline `style={{...}}` attributes throughout the codebase; the
+    #     `'unsafe-inline'` carve-out is the industry-standard React posture
+    #     (CSS can't execute JS). fonts.googleapis.com is needed for the
+    #     Inter/JetBrains Mono/Fraunces stylesheet loaded from index.html.
+    #   - font-src 'self' fonts.gstatic.com: the woff2 files behind the
+    #     Google Fonts stylesheet live on fonts.gstatic.com.
+    #   - img-src 'self' data:: inline SVG data URIs show up in a few
+    #     places (tailwind backgrounds, react-style icons).
+    #   - connect-src 'self': fetch/XHR/SSE all go to our origin via
+    #     nginx; the auth-service does any outbound work to outpost
+    #     backends server-side, so browsers never make cross-origin
+    #     requests in the documented topology.
+    #   - frame-ancestors 'none': nobody may iframe us — clickjacking
+    #     defence for the control-plane.
+    #   - base-uri 'none', object-src 'none', form-action 'self': closes
+    #     remaining XSS-amplifier vectors.
+    #
+    # If you self-host the fonts in a follow-up, drop the two
+    # fonts.g*.com entries.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-3Z8AaOvmmqasb6QB3388DSjiGUeRpW1JXLiUMl7Kq3g='; style-src 'self' 'unsafe-inline' fonts.googleapis.com; font-src 'self' fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    # Permissions-Policy: explicitly turn off browser features we don't
+    # use. Adds defence-in-depth against XSS that tries to grab camera /
+    # mic / geolocation. Adjust if the SPA ever needs any of these.
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+
+    # Docker's embedded DNS — required for runtime upstream resolution below.
+    # We resolve `backend` at request time (via $backend_upstream) so nginx
+    # boots even when the control-plane-only compose omits the backend
+    # service entirely; in that mode the swaggerui / openapi.json routes
+    # simply return 502 if anyone hits them.
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    set $backend_upstream backend:8080;
+
+    # ----- public auth endpoints (login, sign-in, callbacks, etc.) -----
+    location /auth/ {
+        proxy_pass         http://auth:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    # ----- session check used by the gates below (nginx internal) -----
+    location = /__auth_check {
+        internal;
+        proxy_pass             http://auth:3000/auth/_check;
+        proxy_pass_request_body off;
+        proxy_set_header       Content-Length "";
+        proxy_set_header       X-Original-URI $request_uri;
+        proxy_set_header       Cookie         $http_cookie;
+    }
+
+    # ----- registry + per-server proxy → auth service ------------------------
+    # All /api/servers* traffic terminates at the auth service: it owns the
+    # user-scoped registry, attaches per-backend tokens server-side, and
+    # forwards to the chosen backend. The Go backend is no longer involved
+    # in either role on the control plane host.
+    #
+    # The two locations cover both shapes the SPA uses:
+    #   /api/servers        (GET list, POST add)
+    #   /api/servers/<id>/* (PUT/DELETE manage, ANY proxy to that backend)
+    location = /api/servers {
+        auth_request     /__auth_check;
+        proxy_pass         http://auth:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        proxy_read_timeout 30s;
+    }
+    location /api/servers/ {
+        auth_request     /__auth_check;
+        proxy_pass         http://auth:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        # Longer read timeout — this path covers the proxied backend calls,
+        # some of which (e.g. /settings/cloudflare with a refresh) can take
+        # several seconds to complete.
+        proxy_read_timeout 60s;
+    }
+
+    # ----- email whitelist (admin-managed) → auth service -------------------
+    # Admin uses this to pre-authorize emails for sign-up after bootstrap.
+    # All routes are session-gated by auth_request; the auth service itself
+    # enforces admin role inside the handler.
+    location /api/whitelist {
+        auth_request     /__auth_check;
+        proxy_pass         http://auth:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        proxy_read_timeout 30s;
+    }
+
+    # ----- cross-outpost transfer orchestrator → auth service ---------------
+    # POST /api/transfer (create), DELETE /api/transfer/:id (cancel) route
+    # to the auth service; SSE progress at /api/transfer/:id/stream has
+    # its own unbuffered location below.
+    location /api/transfer {
+        auth_request     /__auth_check;
+        proxy_pass         http://auth:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        proxy_read_timeout 30s;
+    }
+
+    # Transfer progress SSE — same unbuffered shape as the dashboard stream.
+    location ~ ^/api/transfer/[^/]+/stream$ {
+        auth_request     /__auth_check;
+        proxy_pass         http://auth:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_cache        off;
+        chunked_transfer_encoding off;
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+    }
+
+    # ----- SSE stream — long-lived, unbuffered ------------------------------
+    # The dashboard's real-time feed runs over Server-Sent Events. Regex
+    # locations take precedence over the prefix match above, so this catches
+    # /api/servers/<id>/stream before the generic location does.
+    #
+    # Three things matter:
+    #   - proxy_buffering off: nginx must not accumulate the chunked response;
+    #     otherwise the browser sees nothing until the buffer fills.
+    #   - chunked_transfer_encoding off: SSE bodies are intrinsically chunked
+    #     but using HTTP/1.1 chunked framing on top adds latency. Off forces
+    #     each upstream write to flush straight through.
+    #   - proxy_read_timeout 1d: the backend sends a keepalive comment every
+    #     25s so 60s would suffice, but a day's headroom means we never
+    #     accidentally close a healthy stream if the keepalive cadence drifts.
+    location ~ ^/api/servers/[^/]+/stream$ {
+        auth_request     /__auth_check;
+        proxy_pass         http://auth:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_cache        off;
+        chunked_transfer_encoding off;
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+    }
+
+    # Per-container log tail (SSE). Same long-lived / unbuffered shape as
+    # the dashboard stream above — duplicated rather than merged because
+    # the location patterns can't be combined without giving up nginx's
+    # longest-prefix safety.
+    location ~ ^/api/servers/[^/]+/containers/[^/]+/logs/stream$ {
+        auth_request     /__auth_check;
+        proxy_pass         http://auth:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_cache        off;
+        chunked_transfer_encoding off;
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+    }
+
+    # ----- API self-documentation (single-host deploys only) -----------------
+    # Swagger UI + OpenAPI spec are served by a backend running alongside the
+    # control plane in docker-compose.prod.yml. In control-plane-only deploys
+    # (docker-compose.prime.yml) there's no such backend; these
+    # locations return 502 in that case. The runtime resolver above lets
+    # nginx boot regardless.
+    location /swaggerui {
+        auth_request     /__auth_check;
+        proxy_pass         http://$backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header   Host                  $host;
+        proxy_set_header   X-Real-IP             $remote_addr;
+        proxy_set_header   X-Forwarded-For       $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto     $scheme;
+        proxy_set_header   X-Vantage-Backend-Token  "${VANTAGE_BACKEND_TOKEN}";
+        proxy_read_timeout 30s;
+    }
+
+    location = /openapi.json {
+        auth_request     /__auth_check;
+        proxy_pass         http://$backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header   Host                  $host;
+        proxy_set_header   X-Real-IP             $remote_addr;
+        proxy_set_header   X-Forwarded-For       $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto     $scheme;
+        proxy_set_header   X-Vantage-Backend-Token  "${VANTAGE_BACKEND_TOKEN}";
+        proxy_read_timeout 30s;
+    }
+
+    # Redirect 401s from auth_request to the login page instead of leaking
+    # raw 401s to the SPA. The SPA can still poll /api/* and follow the 302
+    # to detect "session expired" by inspecting response.redirected.
+    error_page 401 = @to_login;
+    location @to_login {
+        return 302 /login;
+    }
+
+    # ----- SPA fallback -----
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+}

@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 48 17% 95%;
+    --foreground: 45 15% 7%;
+    --card: 0 0% 100%;
+    --card-foreground: 45 15% 7%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 45 15% 7%;
+    --primary: 142 71% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 48 18% 93%;
+    --secondary-foreground: 45 15% 7%;
+    --muted: 48 18% 95%;
+    --muted-foreground: 45 8% 40%;
+    --accent: 48 18% 93%;
+    --accent-foreground: 45 15% 7%;
+    --destructive: 0 73% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 48 18% 87%;
+    --input: 48 18% 87%;
+    --ring: 142 71% 36%;
+    --warn: 32 95% 44%;
+    --warn-foreground: 0 0% 100%;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 45 14% 6%;
+    --foreground: 45 35% 93%;
+    --card: 45 12% 10%;
+    --card-foreground: 45 35% 93%;
+    --popover: 45 12% 11%;
+    --popover-foreground: 45 35% 93%;
+    --primary: 142 71% 45%;
+    --primary-foreground: 45 14% 6%;
+    --secondary: 45 11% 14%;
+    --secondary-foreground: 45 35% 93%;
+    --muted: 45 11% 14%;
+    --muted-foreground: 45 10% 62%;
+    --accent: 45 11% 14%;
+    --accent-foreground: 45 35% 93%;
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 45 11% 16%;
+    --input: 45 11% 16%;
+    --ring: 142 71% 45%;
+    --warn: 32 95% 55%;
+    --warn-foreground: 45 14% 6%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html,
+  body {
+    background: hsl(var(--background));
+  }
+}
+
+@keyframes vantage-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  75% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes vantage-fadein {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

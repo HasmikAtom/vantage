@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Vantage</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #0a0a0a;
+      color: #bbb;
+      font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    a { color: #6ea8fe }
+  </style>
+</head>
+<body>
+  <div id="status">Loading Vantage…</div>
+  <script src="/wails/runtime.js"></script>
+  <script>
+    // Ask the Go side for the configured target URL (VANTAGE_URL env var
+    // or its default). The Wails runtime auto-binds App methods under
+    // window.go.main.App when the webview boots.
+    (async () => {
+      const fallback = 'http://localhost:8088';
+      let target = fallback;
+      try {
+        if (window.go && window.go.main && window.go.main.App) {
+          target = await window.go.main.App.TargetURL();
+        }
+      } catch (_) { /* fall through to fallback */ }
+      const status = document.getElementById('status');
+      status.innerHTML =
+        'Loading <a href="' + target + '">' + target + '</a> …';
+      window.location.replace(target);
+    })();
+  </script>
+</body>
+</html>

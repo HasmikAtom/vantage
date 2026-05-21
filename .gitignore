@@ -1,0 +1,66 @@
+# -------------------------------------------------------------------------
+# Secrets and local state
+# -------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+.claude/
+
+# -------------------------------------------------------------------------
+# Runtime data — encrypted DBs, settings, anything an installed instance
+# would generate. Lives in docker volumes for compose deployments but can
+# end up on disk during local non-Docker runs.
+# -------------------------------------------------------------------------
+gate/data/
+outpost/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.enc
+
+# -------------------------------------------------------------------------
+# Build outputs / dependency caches
+# -------------------------------------------------------------------------
+node_modules/
+**/node_modules/
+prime/dist/
+gate/dist/
+outpost/vantage-api
+outpost/tmp/
+
+# -------------------------------------------------------------------------
+# Desktop apps — build artifacts only; sources and configs are tracked.
+# -------------------------------------------------------------------------
+desktop/wails/build/bin/
+desktop/wails/frontend/wailsjs/
+desktop/tauri/src-tauri/target/
+desktop/tauri/src-tauri/gen/
+
+# -------------------------------------------------------------------------
+# Logs
+# -------------------------------------------------------------------------
+*.log
+outpost/build-errors.log
+
+# -------------------------------------------------------------------------
+# Internal notes & analysis docs — kept locally, not part of the public
+# repo. Default policy: every markdown file is private; README.md is the
+# only one that ships. Add more allow-list entries below if a doc graduates
+# to public.
+# -------------------------------------------------------------------------
+*.md
+!README.md
+
+# -------------------------------------------------------------------------
+# Archives / temp files / OS noise
+# -------------------------------------------------------------------------
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.bak
+*.orig
+*~
+.DS_Store
+*.swp

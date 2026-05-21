@@ -1,0 +1,11 @@
+FROM node:22-bookworm
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install
+
+ARG VANTAGE_VERSION=dev
+ENV VANTAGE_VERSION=$VANTAGE_VERSION
+
+EXPOSE 3000
+CMD ["npm", "run", "dev"]

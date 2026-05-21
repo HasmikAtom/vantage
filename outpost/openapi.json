@@ -1,0 +1,814 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Vantage Dashboard API",
+    "description": "HTTP API exposed by a single Vantage backend (`vantage-api`). Every endpoint sits under `/api/` and is gated by the `X-Vantage-Backend-Token` shared secret. In the standard prod deployment the dashboard's auth-service proxy injects this header on behalf of authenticated browser sessions; if you're calling the backend directly (curl, scripts), supply the header yourself.\n\nMost endpoints serve slices of a single in-memory snapshot refreshed by the collectors loop every ~2s; `GET /api/dashboard` returns the whole snapshot and supports conditional GETs via `ETag` / `If-None-Match`.\n\nMulti-host orchestration — the per-user server registry and `/api/servers*` proxying — lives in the dashboard's auth service, not here. Each `vantage-api` instance is independent and monitors exactly one host.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "/", "description": "Same origin as this docs page" }
+  ],
+  "tags": [
+    { "name": "health", "description": "Liveness / collector status" },
+    { "name": "snapshot", "description": "The full dashboard snapshot" },
+    { "name": "resources", "description": "Individual snapshot slices" },
+    { "name": "settings", "description": "Per-backend configuration (Cloudflare creds, etc.)" }
+  ],
+  "security": [
+    { "backendToken": [] }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Liveness probe + collector error map",
+        "responses": {
+          "200": {
+            "description": "OK — collector statuses listed; an entry per collector with the last error string, or empty when healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "collectors": {
+                      "type": "object",
+                      "additionalProperties": { "type": "string" },
+                      "description": "collector name → last error message (empty string when healthy)"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dashboard": {
+      "get": {
+        "tags": ["snapshot"],
+        "summary": "Full dashboard snapshot",
+        "description": "Returns every collector's current view in one payload. Supports conditional GET — send `If-None-Match: W/\"<version>\"` to short-circuit when the snapshot hasn't changed since the previous response.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": { "type": "string" },
+            "description": "Last seen ETag value. Returns 304 when the snapshot version is unchanged."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fresh snapshot",
+            "headers": {
+              "ETag": {
+                "schema": { "type": "string" },
+                "description": "Weak ETag of the snapshot version, e.g. `W/\"42\"`."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DashboardSnapshot" }
+              }
+            }
+          },
+          "304": {
+            "description": "Not modified — client's `If-None-Match` matched the current snapshot version."
+          }
+        }
+      }
+    },
+    "/api/system": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Host identity, kernel/OS, load average",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SystemInfo" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/headline": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Hero metrics (CPU/GPU/Mem/Swap + sparklines)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Headline" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sensors": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Temperature / fan / voltage probes",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Sensor" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/disks": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Physical disks (SMART + capacity + temperature)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Disk" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/filesystems": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Mounted filesystem capacity",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Filesystem" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/network": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Network interfaces + aggregate throughput sparkline",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Network" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tunnels": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Cloudflare tunnels and probe latencies",
+        "description": "Populated only when Cloudflare API credentials are configured via `/api/settings/cloudflare`. Empty array when no creds are set.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Tunnel" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/containers": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Docker containers visible to the backend",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Container" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/services": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "systemd unit list with state + RSS",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Service" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ports": {
+      "get": {
+        "tags": ["resources"],
+        "summary": "Listening TCP/UDP ports + owning process",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Port" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "tags": ["settings"],
+        "summary": "Stored settings (Cloudflare creds masked)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SettingsView" }
+              }
+            }
+          },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api/settings/cloudflare": {
+      "put": {
+        "tags": ["settings"],
+        "summary": "Set or update Cloudflare credentials",
+        "description": "Overwrites the stored Cloudflare API token / account / tunnel id and (optionally) the auto-refresh interval. Triggers an immediate tunnel refresh.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CloudflareSettings" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/CloudflareUpdateResult" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["settings"],
+        "summary": "Alias for PUT — set or update Cloudflare credentials",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CloudflareSettings" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/CloudflareUpdateResult" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["settings"],
+        "summary": "Clear Cloudflare credentials",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "ok": { "type": "boolean" } }
+                }
+              }
+            }
+          },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api/settings/cloudflare/refresh": {
+      "post": {
+        "tags": ["settings"],
+        "summary": "Force an immediate Cloudflare tunnel refresh",
+        "responses": {
+          "200": {
+            "description": "OK — `refresh` is empty on success, error message on failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok":      { "type": "boolean" },
+                    "refresh": { "type": "string", "description": "Empty when refresh succeeded." }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "backendToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Vantage-Backend-Token",
+        "description": "Shared secret required on every request; the backend refuses to start without `VANTAGE_BACKEND_TOKEN` set. In the standard dashboard deployment the auth service injects this header server-side when proxying browser sessions to a registered backend, so end-users don't supply it themselves; CLI / direct callers must."
+      }
+    },
+    "responses": {
+      "Ok": {
+        "description": "Generic OK",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": { "ok": { "type": "boolean", "example": true } }
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Malformed input",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Settings store unavailable",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "CloudflareUpdateResult": {
+        "description": "Settings written; immediate refresh attempted.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "ok":      { "type": "boolean" },
+                "view":    { "$ref": "#/components/schemas/SettingsView" },
+                "refresh": { "type": "string", "description": "Empty when refresh succeeded after the update." }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": { "error": { "type": "string" } }
+      },
+      "SystemInfo": {
+        "type": "object",
+        "properties": {
+          "hostname":    { "type": "string" },
+          "fingerprint": { "type": "string" },
+          "os":          { "type": "string" },
+          "kernel":      { "type": "string" },
+          "cpuModel":    { "type": "string" },
+          "cpuClock":    { "type": "string" },
+          "cpuCores":    { "type": "integer" },
+          "uptimeText":  { "type": "string" },
+          "uptimeDays":  { "type": "integer" },
+          "bootedAt":    { "type": "string" },
+          "timeText":    { "type": "string" },
+          "loadAvg":     { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 }
+        }
+      },
+      "CPUHeadline": {
+        "type": "object",
+        "properties": {
+          "pct":        { "type": "number" },
+          "user":       { "type": "number" },
+          "system":     { "type": "number" },
+          "idle":       { "type": "number" },
+          "iowait":     { "type": "number" },
+          "ctxSwitch":  { "type": "integer" },
+          "interrupts": { "type": "integer" },
+          "softInt":    { "type": "integer" },
+          "temp":       { "type": "integer" },
+          "powerW":     { "type": "number", "description": "RAPL package draw, watts. 0 when RAPL unavailable." }
+        }
+      },
+      "VRAM": {
+        "type": "object",
+        "properties": {
+          "used":  { "type": "number" },
+          "total": { "type": "number" },
+          "unit":  { "type": "string", "example": "GB" }
+        }
+      },
+      "GPUHeadline": {
+        "type": "object",
+        "properties": {
+          "name":     { "type": "string" },
+          "driver":   { "type": "string", "enum": ["nouveau", "amdgpu", "nvidia", ""] },
+          "pct":      { "type": "number" },
+          "vram":     { "$ref": "#/components/schemas/VRAM" },
+          "temp":     { "type": "integer" },
+          "fan":      { "type": "integer" },
+          "powerW":   { "type": "number" },
+          "voltageV": { "type": "number" },
+          "coreMhz":  { "type": "integer" },
+          "memMhz":   { "type": "integer" },
+          "pstate":   { "type": "string" },
+          "pcie": {
+            "type": "object",
+            "properties": {
+              "currentSpeed": { "type": "string" },
+              "currentWidth": { "type": "integer" },
+              "maxSpeed":     { "type": "string" },
+              "maxWidth":     { "type": "integer" }
+            }
+          },
+          "processes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pid":    { "type": "integer" },
+                "name":   { "type": "string" },
+                "device": { "type": "string", "example": "/dev/dri/renderD128" }
+              }
+            }
+          }
+        }
+      },
+      "MemHeadline": {
+        "type": "object",
+        "properties": {
+          "pct":      { "type": "number" },
+          "total":    { "type": "number" },
+          "used":     { "type": "number" },
+          "free":     { "type": "number" },
+          "active":   { "type": "number" },
+          "inactive": { "type": "number" },
+          "buffers":  { "type": "number" },
+          "cached":   { "type": "number" },
+          "unit":     { "type": "string", "example": "GB" },
+          "powerW":   { "type": "number", "description": "RAPL DRAM domain, watts. 0 when not exposed." }
+        }
+      },
+      "SwapHeadline": {
+        "type": "object",
+        "properties": {
+          "pct":   { "type": "number" },
+          "total": { "type": "number" },
+          "used":  { "type": "number" },
+          "free":  { "type": "number" },
+          "unit":  { "type": "string" }
+        }
+      },
+      "Headline": {
+        "type": "object",
+        "properties": {
+          "cpu":          { "$ref": "#/components/schemas/CPUHeadline" },
+          "gpu":          { "$ref": "#/components/schemas/GPUHeadline" },
+          "mem":          { "$ref": "#/components/schemas/MemHeadline" },
+          "swap":         { "$ref": "#/components/schemas/SwapHeadline" },
+          "cpuSpark":     { "type": "array", "items": { "type": "number" } },
+          "gpuSpark":     { "type": "array", "items": { "type": "number" } },
+          "memSpark":     { "type": "array", "items": { "type": "number" } },
+          "storageSpark": { "type": "array", "items": { "type": "number" } }
+        }
+      },
+      "Sensor": {
+        "type": "object",
+        "properties": {
+          "id":      { "type": "string" },
+          "label":   { "type": "string" },
+          "group":   { "type": "string", "example": "cpu" },
+          "value":   { "type": "number" },
+          "unit":    { "type": "string", "example": "°C" },
+          "max":     { "type": "number" },
+          "history": { "type": "array", "items": { "type": "number" } }
+        }
+      },
+      "Disk": {
+        "type": "object",
+        "properties": {
+          "id":           { "type": "string" },
+          "label":        { "type": "string" },
+          "model":        { "type": "string" },
+          "mount":        { "type": "string" },
+          "type":         { "type": "string", "example": "ssd" },
+          "total":        { "type": "number" },
+          "used":         { "type": "number" },
+          "health":       { "type": "string" },
+          "tempC":        { "type": "integer" },
+          "powerOnHours": { "type": "integer" },
+          "writes":       { "type": "number" },
+          "reads":        { "type": "number" },
+          "smart": {
+            "type": "object",
+            "properties": {
+              "passed":      { "type": "boolean" },
+              "reallocated": { "type": "integer" },
+              "pending":     { "type": "integer" },
+              "lifeLeft":    { "type": "integer" }
+            }
+          },
+          "detail": {
+            "type": ["object", "null"],
+            "description": "Full SMART disclosure. See SmartDetail in the source for full shape."
+          }
+        }
+      },
+      "Filesystem": {
+        "type": "object",
+        "properties": {
+          "mount":  { "type": "string" },
+          "fstype": { "type": "string" },
+          "used":   { "type": "number" },
+          "total":  { "type": "number" },
+          "unit":   { "type": "string" }
+        }
+      },
+      "Network": {
+        "type": "object",
+        "properties": {
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name":   { "type": "string" },
+                "ip":     { "type": "string" },
+                "rx":     { "type": "integer" },
+                "tx":     { "type": "integer" },
+                "status": { "type": "string", "example": "up" }
+              }
+            }
+          },
+          "sparkline": { "type": "array", "items": { "type": "integer" } }
+        }
+      },
+      "Tunnel": {
+        "type": "object",
+        "properties": {
+          "id":          { "type": "string" },
+          "tunnelId":    { "type": "string" },
+          "tunnelName":  { "type": "string" },
+          "hostname":    { "type": "string" },
+          "service":     { "type": "string" },
+          "target":      { "type": "string" },
+          "status":      { "type": "string", "example": "healthy" },
+          "requests24h": { "type": "integer" },
+          "latencyMs":   { "type": "integer" },
+          "origin":      { "type": "string" }
+        }
+      },
+      "Container": {
+        "type": "object",
+        "properties": {
+          "name":   { "type": "string" },
+          "status": { "type": "string", "example": "running" },
+          "uptime": { "type": "string" },
+          "cpu":    { "type": ["number", "null"] },
+          "mem":    { "type": ["number", "null"] },
+          "image":  { "type": "string" },
+          "ports":  { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Service": {
+        "type": "object",
+        "properties": {
+          "name":        { "type": "string" },
+          "status":      { "type": "string" },
+          "enabled":     { "type": "boolean" },
+          "pid":         { "type": ["integer", "null"] },
+          "memMb":       { "type": "number" },
+          "user":        { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "Port": {
+        "type": "object",
+        "properties": {
+          "port":    { "type": "integer" },
+          "proto":   { "type": "string", "example": "tcp" },
+          "service": { "type": "string" },
+          "exposed": { "type": "string" },
+          "pid":     { "type": ["integer", "null"] },
+          "process": { "type": "string" }
+        }
+      },
+      "ProcessInfo": {
+        "type": "object",
+        "properties": {
+          "pid":     { "type": "integer" },
+          "name":    { "type": "string" },
+          "user":    { "type": "string" },
+          "cpu":     { "type": "number", "description": "Percent of one core." },
+          "memMb":   { "type": "number", "description": "RSS, MiB." },
+          "cmd":     { "type": "string" },
+          "threads": { "type": "integer" }
+        }
+      },
+      "PressureLine": {
+        "type": "object",
+        "properties": {
+          "avg10":  { "type": "number" },
+          "avg60":  { "type": "number" },
+          "avg300": { "type": "number" }
+        }
+      },
+      "Pressure": {
+        "type": "object",
+        "properties": {
+          "cpu":       { "$ref": "#/components/schemas/PressureLine" },
+          "memSome":   { "$ref": "#/components/schemas/PressureLine" },
+          "memFull":   { "$ref": "#/components/schemas/PressureLine" },
+          "ioSome":    { "$ref": "#/components/schemas/PressureLine" },
+          "ioFull":    { "$ref": "#/components/schemas/PressureLine" },
+          "available": { "type": "boolean", "description": "false when the kernel doesn't expose /proc/pressure/*." }
+        }
+      },
+      "CoreUsage": {
+        "type": "object",
+        "properties": {
+          "core": { "type": "integer" },
+          "pct":  { "type": "number" }
+        }
+      },
+      "DiskIO": {
+        "type": "object",
+        "properties": {
+          "id":        { "type": "string" },
+          "readBps":   { "type": "number" },
+          "writeBps":  { "type": "number" },
+          "readIops":  { "type": "number" },
+          "writeIops": { "type": "number" },
+          "utilPct":   { "type": "number" }
+        }
+      },
+      "DockerDFCategory": {
+        "type": "object",
+        "properties": {
+          "count":        { "type": "integer" },
+          "active":       { "type": "integer" },
+          "sizeBytes":    { "type": "integer" },
+          "reclaimBytes": { "type": "integer" }
+        }
+      },
+      "DockerDF": {
+        "type": "object",
+        "properties": {
+          "images":     { "$ref": "#/components/schemas/DockerDFCategory" },
+          "containers": { "$ref": "#/components/schemas/DockerDFCategory" },
+          "volumes":    { "$ref": "#/components/schemas/DockerDFCategory" },
+          "buildCache": { "$ref": "#/components/schemas/DockerDFCategory" }
+        }
+      },
+      "Connection": {
+        "type": "object",
+        "properties": {
+          "remoteIp":  { "type": "string" },
+          "localPort": { "type": "integer" },
+          "service":   { "type": "string" },
+          "count":     { "type": "integer" }
+        }
+      },
+      "UpdateInfo": {
+        "type": "object",
+        "properties": {
+          "upgradableCount": { "type": "integer" },
+          "securityCount":   { "type": "integer" },
+          "rebootRequired":  { "type": "boolean" },
+          "rebootPkgs":      { "type": "array", "items": { "type": "string" } },
+          "summary":         { "type": "string" }
+        }
+      },
+      "JournalEntry": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": "string", "example": "2026-05-17T11:22:33Z" },
+          "unit":      { "type": "string" },
+          "priority":  { "type": "integer", "description": "syslog severity 0..7" },
+          "message":   { "type": "string" }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "username": { "type": "string" },
+          "uid":      { "type": "integer" },
+          "gid":      { "type": "integer" },
+          "gecos":    { "type": "string" },
+          "home":     { "type": "string" },
+          "shell":    { "type": "string" },
+          "system":   { "type": "boolean" },
+          "groups":   { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Group": {
+        "type": "object",
+        "properties": {
+          "name":    { "type": "string" },
+          "gid":     { "type": "integer" },
+          "members": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "UsersInfo": {
+        "type": "object",
+        "properties": {
+          "users":  { "type": "array", "items": { "$ref": "#/components/schemas/User" } },
+          "groups": { "type": "array", "items": { "$ref": "#/components/schemas/Group" } }
+        }
+      },
+      "DashboardSnapshot": {
+        "type": "object",
+        "properties": {
+          "system":      { "$ref": "#/components/schemas/SystemInfo" },
+          "headline":    { "$ref": "#/components/schemas/Headline" },
+          "sensors":     { "type": "array", "items": { "$ref": "#/components/schemas/Sensor" } },
+          "disks":       { "type": "array", "items": { "$ref": "#/components/schemas/Disk" } },
+          "filesystems": { "type": "array", "items": { "$ref": "#/components/schemas/Filesystem" } },
+          "network":     { "$ref": "#/components/schemas/Network" },
+          "tunnels":     { "type": "array", "items": { "$ref": "#/components/schemas/Tunnel" } },
+          "containers":  { "type": "array", "items": { "$ref": "#/components/schemas/Container" } },
+          "services":    { "type": "array", "items": { "$ref": "#/components/schemas/Service" } },
+          "ports":       { "type": "array", "items": { "$ref": "#/components/schemas/Port" } },
+          "processes":   { "type": "array", "items": { "$ref": "#/components/schemas/ProcessInfo" } },
+          "cores":       { "type": "array", "items": { "$ref": "#/components/schemas/CoreUsage" } },
+          "pressure":    { "$ref": "#/components/schemas/Pressure" },
+          "diskIo":      { "type": "array", "items": { "$ref": "#/components/schemas/DiskIO" } },
+          "dockerDf":    { "$ref": "#/components/schemas/DockerDF" },
+          "connections": { "type": "array", "items": { "$ref": "#/components/schemas/Connection" } },
+          "updates":     { "$ref": "#/components/schemas/UpdateInfo" },
+          "journal":     { "type": "array", "items": { "$ref": "#/components/schemas/JournalEntry" } },
+          "users":       { "$ref": "#/components/schemas/UsersInfo" }
+        }
+      },
+      "CloudflareSettings": {
+        "type": "object",
+        "properties": {
+          "apiToken":    { "type": "string" },
+          "accountId":   { "type": "string" },
+          "tunnelId":    { "type": "string" },
+          "refreshSecs": { "type": "integer", "description": "Auto-refresh interval. Bounded by the backend's `MinCloudflareRefreshSecs` / `MaxCloudflareRefreshSecs`." }
+        },
+        "required": ["apiToken", "accountId"]
+      },
+      "SettingsView": {
+        "type": "object",
+        "description": "Stored settings as exposed to the SPA. Secrets are not returned in full — only presence and a short fingerprint."
+      }
+    }
+  }
+}

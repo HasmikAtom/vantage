@@ -1,0 +1,88 @@
+name: vantage-outpost
+
+# Backend-only deploy for a secondary box that the dashboard's auth-service
+# proxy registers and calls through `/api/servers/<id>/...`. No auth, no
+# frontend, no nginx — the only gate is the shared VANTAGE_BACKEND_TOKEN
+# header.
+#
+# Port exposure defaults to 0.0.0.0 because the dashboard host has to be
+# able to reach this container over the network — that's the whole point
+# of running an outpost. The token gates access at the HTTP layer.
+#
+# ⚠ Only deploy on a trusted network. If this box has a public-internet
+#   NIC, override VANTAGE_OUTPOST_BIND to the LAN / VPN / Tailscale IP so
+#   the container doesn't accept connections from outside that interface:
+#
+#     VANTAGE_BACKEND_TOKEN=... VANTAGE_OUTPOST_BIND=100.64.0.5 \
+#       docker compose -f docker-compose.outpost.yml up -d --build
+#
+#   On a private LAN with no public NIC, the default is fine.
+
+services:
+  backend:
+    build:
+      context: ./outpost
+      dockerfile: Dockerfile
+      args:
+        VANTAGE_VERSION: ${VANTAGE_VERSION:-dev}
+    image: vantage-backend:${VANTAGE_VERSION:-dev}
+    container_name: vantage-outpost
+    restart: unless-stopped
+    cap_add:
+      - SYS_RAWIO
+      - SYS_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - apparmor=unconfined
+    device_cgroup_rules:
+      - 'b 8:* rwm'
+      - 'b 259:* rwm'
+    environment:
+      HOST_PROC: /host/proc
+      HOST_SYS:  /host/sys
+      HOST_ETC:  /host/etc
+      HOST_ROOT: /hostfs
+      DBUS_SYSTEM_BUS_ADDRESS: unix:path=/run/dbus/system_bus_socket
+      DOCKER_SOCK: /var/run/docker.sock
+      VANTAGE_DATA_DIR: /data
+      VANTAGE_ENCRYPTION_KEY: ${VANTAGE_ENCRYPTION_KEY:-}
+      VANTAGE_BACKEND_TOKEN: ${VANTAGE_BACKEND_TOKEN:?VANTAGE_BACKEND_TOKEN must be set on the outpost — see docker-compose.outpost.yml}
+      # Per-host Cloudflare creds can also be configured later via the
+      # primary's Settings page, which proxies through to this backend.
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      CLOUDFLARE_TUNNEL_ID: ${CLOUDFLARE_TUNNEL_ID:-}
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/hostname:/host/etc/hostname:ro
+      - /etc/machine-id:/host/etc/machine-id:ro
+      # Users tab — collect_users.go parses these two files via $HOST_ETC.
+      # Mounting read-only is enough; the collector only reads.
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      - /run/systemd:/run/systemd:ro
+      # rw is required for the file-manager write ops (mkdir, upload,
+      # rename, delete-to-trash) and for Phase 2's POST /fs/receive
+      # endpoint that cross-outpost transfers land on. The blast radius
+      # is the same as on prime: operator role + docker.sock
+      # is already root-equivalent, so a rw /hostfs doesn't widen the
+      # attack surface meaningfully — it just lets the obvious paths
+      # (file edits, transfers, trash) actually work.
+      - /:/hostfs:rw,rslave
+      - /dev:/dev
+      - vantage-outpost-data:/data
+    ports:
+      # Default: all interfaces on host port 8095. The dashboard's
+      # auth-service proxy needs to reach this from another host on the
+      # network; binding to 127.0.0.1 would defeat the entire outpost role.
+      # Override VANTAGE_OUTPOST_BIND to pin to a specific NIC (Tailscale,
+      # VPN, LAN bridge) — strongly recommended on any box with a public IP.
+      - "${VANTAGE_OUTPOST_BIND:-0.0.0.0}:${VANTAGE_OUTPOST_PORT:-8095}:8080"
+
+volumes:
+  vantage-outpost-data:

@@ -1,0 +1,88 @@
+name: vantage-prime
+
+# Prime deployment: the dashboard SPA (`prime`) + auth service (`gate`) on
+# one host, with no co-located monitoring backend. "Prime" is shorthand
+# for the prime + gate pair. Use this when:
+#   - this host shouldn't be monitored at all, or
+#   - every monitored host runs its own vantage-api daemon / container and is
+#     reachable from here (LAN, Tailscale, WireGuard, …).
+#
+# Each user adds their backends via the first-run flow in the SPA — URL +
+# X-Vantage-Backend-Token shared secret. The auth service stores them
+# encrypted per user (VANTAGE_REGISTRY_KEY) and proxies API calls.
+#
+# Required env (.env):
+#   BETTER_AUTH_SECRET       — `openssl rand -base64 32`
+#   VANTAGE_REGISTRY_KEY     — `openssl rand -base64 32`
+#
+# Optional env:
+#   VANTAGE_PROD_PORT        — host port for the SPA (default 8088)
+#   VANTAGE_HOSTNAME         — public hostname for trusted-origin / RP ID
+#   VANTAGE_LAN_IP           — additional trusted origin
+#   BETTER_AUTH_URL          — canonical absolute URL of this prime host
+#   GITHUB_/GOOGLE_CLIENT_*  — optional OAuth providers
+
+services:
+  auth:
+    build:
+      context: ./gate
+      dockerfile: Dockerfile
+      args:
+        VANTAGE_VERSION: ${VANTAGE_VERSION:-dev}
+    image: vantage-gate:${VANTAGE_VERSION:-dev}
+    container_name: vantage-gate
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      AUTH_DB_PATH: /data/auth.db
+      AUTH_BASE_PATH: /auth
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
+      VANTAGE_REGISTRY_KEY: ${VANTAGE_REGISTRY_KEY:?VANTAGE_REGISTRY_KEY must be set (openssl rand -base64 32)}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_PROD_PORT:-8088}}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:${VANTAGE_PROD_PORT:-8088},http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_PROD_PORT:-8088},http://${VANTAGE_LAN_IP:-127.0.0.1}:${VANTAGE_PROD_PORT:-8088}}
+      AUTH_RP_ID:   ${AUTH_RP_ID:-${VANTAGE_HOSTNAME:-localhost}}
+      AUTH_RP_NAME: ${AUTH_RP_NAME:-Vantage}
+      GITHUB_CLIENT_ID:     ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID:     ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Outposts registered from this prime host almost always live on
+      # private addresses (LAN 192.168.x / 10.x, Tailscale 100.64.x).
+      # Default the SSRF guard's private-range allow ON so registration
+      # + proxying just works. Override to "0" only if your outposts are
+      # exclusively on public IPs and you want SSRF defence at full
+      # strictness.
+      AUTH_SSRF_ALLOW_PRIVATE: ${AUTH_SSRF_ALLOW_PRIVATE:-1}
+    volumes:
+      - vantage-gate-data:/data
+    expose:
+      - "3000"
+    networks:
+      - vantage-prime
+
+  frontend:
+    build:
+      context: ./prime
+      dockerfile: Dockerfile
+      args:
+        VANTAGE_VERSION: ${VANTAGE_VERSION:-dev}
+    image: vantage-prime:${VANTAGE_VERSION:-dev}
+    container_name: vantage-prime
+    restart: unless-stopped
+    environment:
+      # Unused in prime mode (no co-located backend), but the nginx
+      # template still references it. Leave empty.
+      VANTAGE_BACKEND_TOKEN: ""
+    ports:
+      - "${VANTAGE_PROD_PORT:-8088}:80"
+    depends_on:
+      - auth
+    networks:
+      - vantage-prime
+
+networks:
+  vantage-prime:
+    name: vantage-prime
+
+volumes:
+  vantage-gate-data:

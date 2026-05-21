@@ -1,0 +1,26 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/vantage-api ."
+  bin = "./tmp/vantage-api"
+  args_bin = ["-addr=:8080"]
+  include_ext = ["go"]
+  exclude_dir = ["tmp"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 500
+  kill_delay = "500ms"
+  stop_on_error = true
+  log = "build-errors.log"
+
+[log]
+  time = true
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true

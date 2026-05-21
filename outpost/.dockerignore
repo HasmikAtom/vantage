@@ -1,0 +1,10 @@
+tmp/
+build-errors.log
+*.log
+*.test
+.git
+.gitignore
+README.md
+Dockerfile*
+.dockerignore
+.air.toml
