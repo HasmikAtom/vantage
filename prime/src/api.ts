@@ -543,6 +543,36 @@ export function fsRename(serverId: string, from: string, to: string): Promise<vo
   });
 }
 
+// fsCopy duplicates `from` to `to` on the same host. `to` is the full
+// destination path. recursive=true is required for directory sources;
+// overwrite=true replaces an existing regular-file destination.
+export function fsCopy(
+  serverId: string,
+  from: string,
+  to: string,
+  opts: { overwrite?: boolean; recursive?: boolean } = {},
+): Promise<void> {
+  return apiFetch<void>(`${serverBase(serverId)}/fs/copy`, {
+    method: 'POST',
+    json: { from, to, overwrite: !!opts.overwrite, recursive: !!opts.recursive },
+  });
+}
+
+// fsMove relocates `from` to `to` on the same host. Falls back to
+// copy+delete on cross-filesystem moves (EXDEV). overwrite=true replaces
+// an existing regular-file destination.
+export function fsMove(
+  serverId: string,
+  from: string,
+  to: string,
+  opts: { overwrite?: boolean } = {},
+): Promise<void> {
+  return apiFetch<void>(`${serverBase(serverId)}/fs/move`, {
+    method: 'POST',
+    json: { from, to, overwrite: !!opts.overwrite },
+  });
+}
+
 export function fsDelete(serverId: string, path: string): Promise<void> {
   return apiFetch<void>(
     `${serverBase(serverId)}/fs/entry?path=${encodeURIComponent(path)}`,

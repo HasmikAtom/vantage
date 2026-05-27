@@ -306,6 +306,277 @@ func safeRename(from, to, role string) (fromHost, toHost string, err error) {
 	return fromHost, toHost, nil
 }
 
+// copyOpts modifies the copy walk: Overwrite replaces an existing
+// regular-file destination, Recursive is required when the source is a
+// directory.
+type copyOpts struct {
+	Overwrite bool
+	Recursive bool
+}
+
+// safeCopy duplicates `from` to `to`. Both paths route through
+// resolveSafeName so the denylist + policy checks apply to each side.
+//
+// Behaviour:
+//   - Source may be a regular file, a symlink (copied as a symlink — target
+//     is preserved verbatim, NOT followed), or a directory (requires
+//     opts.Recursive).
+//   - Special files (devices, FIFOs, sockets) are refused (ErrSpecialFile).
+//   - If the destination exists and is a directory, the copy is refused —
+//     callers must pass the final path, mirroring the rename contract.
+//   - If the destination exists as a regular file or symlink, behaviour
+//     depends on opts.Overwrite. Off (the default) → os.ErrExist (handler
+//     maps to 409). On → atomic replace via temp + rename.
+//   - Refuses to copy a path onto itself or into its own subtree.
+//   - Best-effort preservation of mode bits and uid/gid (silent on Chown
+//     failure — running as non-root in tests must not break the copy).
+//
+// Containment: every syscall goes through hostRootHandle so a symlink swap
+// on any parent component cannot redirect the walk outside hostRoot.
+func safeCopy(from, to, role string, opts copyOpts) (fromHost, toHost string, err error) {
+	srcRel, fromHost, err := resolveSafeName(from, FsOpCopy, role)
+	if err != nil {
+		return "", "", err
+	}
+	dstRel, toHost, err := resolveSafeName(to, FsOpCopy, role)
+	if err != nil {
+		return fromHost, "", err
+	}
+	if srcRel == dstRel {
+		return fromHost, toHost, fmt.Errorf("source and destination are the same")
+	}
+	if isDescendantRel(srcRel, dstRel) {
+		return fromHost, toHost, fmt.Errorf("destination is inside source")
+	}
+
+	srcInfo, err := hostRootHandle.Lstat(srcRel)
+	if err != nil {
+		return fromHost, toHost, err
+	}
+
+	if dstInfo, derr := hostRootHandle.Lstat(dstRel); derr == nil {
+		if dstInfo.IsDir() {
+			return fromHost, toHost, fmt.Errorf("destination is an existing directory")
+		}
+		if !opts.Overwrite {
+			return fromHost, toHost, os.ErrExist
+		}
+		if srcInfo.IsDir() {
+			return fromHost, toHost, fmt.Errorf("cannot overwrite a file with a directory")
+		}
+	} else if !errors.Is(derr, os.ErrNotExist) {
+		return fromHost, toHost, derr
+	}
+
+	if err := copyTree(srcRel, dstRel, srcInfo, opts); err != nil {
+		return fromHost, toHost, err
+	}
+	return fromHost, toHost, nil
+}
+
+// safeMove relocates `from` to `to`. Same-filesystem renames use the kernel
+// rename in one step; cross-filesystem moves transparently fall back to
+// copy+delete via copyTree + RemoveAll. Both halves of the fallback run
+// through hostRootHandle.
+//
+// Behaviour parallels safeCopy:
+//   - Destination must not be an existing directory.
+//   - opts.Overwrite=false (default) refuses to clobber any existing dest.
+//   - opts.Overwrite=true allows replacing an existing regular file /
+//     symlink — for the rename fast-path this is the kernel's default
+//     atomic-replace; for the EXDEV fallback we honour it by passing the
+//     flag down to copyTree.
+//   - Refuses a move onto self or into its own subtree.
+func safeMove(from, to, role string, opts copyOpts) (fromHost, toHost string, err error) {
+	srcRel, fromHost, err := resolveSafeName(from, FsOpRename, role)
+	if err != nil {
+		return "", "", err
+	}
+	dstRel, toHost, err := resolveSafeName(to, FsOpRename, role)
+	if err != nil {
+		return fromHost, "", err
+	}
+	if srcRel == dstRel {
+		return fromHost, toHost, fmt.Errorf("source and destination are the same")
+	}
+	if isDescendantRel(srcRel, dstRel) {
+		return fromHost, toHost, fmt.Errorf("destination is inside source")
+	}
+
+	// Pre-check the destination so overwrite=false refuses BEFORE we
+	// touch the source. Without this Lstat the kernel rename would
+	// silently clobber a regular-file dest.
+	srcInfo, err := hostRootHandle.Lstat(srcRel)
+	if err != nil {
+		return fromHost, toHost, err
+	}
+	if dstInfo, derr := hostRootHandle.Lstat(dstRel); derr == nil {
+		if dstInfo.IsDir() {
+			return fromHost, toHost, fmt.Errorf("destination is an existing directory")
+		}
+		if !opts.Overwrite {
+			return fromHost, toHost, os.ErrExist
+		}
+		if srcInfo.IsDir() {
+			return fromHost, toHost, fmt.Errorf("cannot overwrite a file with a directory")
+		}
+	} else if !errors.Is(derr, os.ErrNotExist) {
+		return fromHost, toHost, derr
+	}
+
+	if err := hostRootHandle.Rename(srcRel, dstRel); err == nil {
+		return fromHost, toHost, nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return fromHost, toHost, err
+	}
+
+	// Cross-filesystem move: copy then delete. Recursive is implicit
+	// when source is a directory — the rename would have handled the
+	// non-recursive case in one syscall.
+	opts.Recursive = true
+	if err := copyTree(srcRel, dstRel, srcInfo, opts); err != nil {
+		return fromHost, toHost, err
+	}
+	if err := hostRootHandle.RemoveAll(srcRel); err != nil {
+		return fromHost, toHost, err
+	}
+	return fromHost, toHost, nil
+}
+
+// copyTree dispatches by source kind. Called both from safeCopy and the
+// EXDEV fallback in safeMove. srcInfo must be the Lstat result for srcRel
+// (so symlinks are detected, not followed).
+func copyTree(srcRel, dstRel string, srcInfo os.FileInfo, opts copyOpts) error {
+	mode := srcInfo.Mode()
+	switch {
+	case mode&os.ModeSymlink != 0:
+		target, err := hostRootHandle.Readlink(srcRel)
+		if err != nil {
+			return err
+		}
+		// For overwrite=true the caller has already authorised replacing
+		// the dest; remove first so Symlink doesn't fail with EEXIST.
+		_ = hostRootHandle.Remove(dstRel)
+		return hostRootHandle.Symlink(target, dstRel)
+	case mode.IsRegular():
+		return copyRegularFile(srcRel, dstRel, srcInfo)
+	case mode.IsDir():
+		if !opts.Recursive {
+			return fmt.Errorf("source is a directory (pass recursive=true)")
+		}
+		return copyDir(srcRel, dstRel, srcInfo, opts)
+	default:
+		return ErrSpecialFile
+	}
+}
+
+// copyRegularFile streams srcRel → dstRel via a sibling temp-file with an
+// atomic rename, mirroring safeUpload's contract: mid-stream failures
+// never leave the destination half-written. Mode bits are preserved from
+// the source; uid/gid is preserved best-effort (silent on failure so a
+// non-root process can still copy).
+func copyRegularFile(srcRel, dstRel string, srcInfo os.FileInfo) error {
+	src, err := hostRootHandle.OpenFile(srcRel, os.O_RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dir, leaf := splitRootRel(dstRel)
+	if leaf == "" || leaf == "." {
+		return fmt.Errorf("invalid destination")
+	}
+	tmpName, err := randomTmpName(dir, leaf)
+	if err != nil {
+		return err
+	}
+	mode := srcInfo.Mode().Perm()
+	dst, err := hostRootHandle.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	cleanup := func() { _ = hostRootHandle.Remove(tmpName) }
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		cleanup()
+		return err
+	}
+	if err := dst.Chmod(mode); err != nil {
+		_ = dst.Close()
+		cleanup()
+		return err
+	}
+	if st, ok := srcInfo.Sys().(*syscall.Stat_t); ok {
+		// Silent: copy still succeeds even if chown is denied (matches
+		// the upload / write-text rules).
+		_ = dst.Chown(int(st.Uid), int(st.Gid))
+	}
+	if err := dst.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := hostRootHandle.Rename(tmpName, dstRel); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
+}
+
+// copyDir recursively duplicates a directory. The destination directory is
+// created with the source's perm bits; uid/gid is preserved best-effort.
+// Each child is dispatched through copyTree so symlinks remain symlinks
+// and nested dirs descend further.
+func copyDir(srcRel, dstRel string, srcInfo os.FileInfo, opts copyOpts) error {
+	mode := srcInfo.Mode().Perm()
+	if err := hostRootHandle.Mkdir(dstRel, mode); err != nil {
+		return err
+	}
+	if st, ok := srcInfo.Sys().(*syscall.Stat_t); ok {
+		_ = hostRootHandle.Lchown(dstRel, int(st.Uid), int(st.Gid))
+	}
+	d, err := hostRootHandle.OpenFile(srcRel, os.O_RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	names, err := d.Readdirnames(-1)
+	_ = d.Close()
+	if err != nil {
+		return err
+	}
+	for _, n := range names {
+		childSrc := joinRootRel(srcRel, n)
+		childDst := joinRootRel(dstRel, n)
+		childInfo, err := hostRootHandle.Lstat(childSrc)
+		if err != nil {
+			return err
+		}
+		if err := copyTree(childSrc, childDst, childInfo, opts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// joinRootRel joins two root-relative path segments, handling the "."
+// root case that splitRootRel leaves behind.
+func joinRootRel(rel, name string) string {
+	if rel == "" || rel == "." {
+		return name
+	}
+	return rel + "/" + name
+}
+
+// isDescendantRel reports whether `dst` is `src` or sits inside `src/`.
+// Used to refuse copy/move from /a/b into /a/b/c (infinite copy / broken
+// move). Inputs are root-relative paths from resolveSafeName, so they're
+// already canonical.
+func isDescendantRel(src, dst string) bool {
+	if src == dst {
+		return true
+	}
+	return strings.HasPrefix(dst, src+"/")
+}
+
 // safeChmod sets perm on `in`. NOTE: per os.Root docs, Chmod has a
 // narrow Unix race window where a file-to-symlink swap mid-operation
 // can land the chmod on the link instead of the target. This is a

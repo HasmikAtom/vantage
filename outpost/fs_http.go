@@ -269,6 +269,81 @@ func fsRenameHandler() http.HandlerFunc {
 	}
 }
 
+// fsCopyHandler duplicates a host path. Body:
+//
+//	{from, to, overwrite?: bool, recursive?: bool}
+//
+// `to` is the FULL destination path (the same contract as fsRename — the
+// frontend joins parent + new name). overwrite=false (the default)
+// refuses an existing destination; recursive=true is required when
+// copying a directory. Operator role gates the write.
+func fsCopyHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(auditActionHeader, "fs.copy")
+		if !roleAtLeast(roleOperator, r.Header.Get(roleHeader)) {
+			writeErr(w, http.StatusForbidden, "insufficient role")
+			return
+		}
+		var body struct {
+			From      string `json:"from"`
+			To        string `json:"to"`
+			Overwrite bool   `json:"overwrite"`
+			Recursive bool   `json:"recursive"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+			return
+		}
+		w.Header().Set(auditTargetHeader, body.From+" -> "+body.To)
+		if _, _, err := safeCopy(body.From, body.To, r.Header.Get(roleHeader), copyOpts{
+			Overwrite: body.Overwrite,
+			Recursive: body.Recursive,
+		}); err != nil {
+			fsWriteErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}
+}
+
+// fsMoveHandler relocates a host path. Body:
+//
+//	{from, to, overwrite?: bool}
+//
+// Uses the kernel rename on the same filesystem; transparently falls back
+// to copy+delete on EXDEV. Unlike fsRenameHandler this endpoint accepts
+// an `overwrite` flag so callers can opt into replacing an existing
+// regular file destination — fsRename keeps the legacy strict no-clobber
+// behaviour for back-compat. Operator role gates the write.
+func fsMoveHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(auditActionHeader, "fs.move")
+		if !roleAtLeast(roleOperator, r.Header.Get(roleHeader)) {
+			writeErr(w, http.StatusForbidden, "insufficient role")
+			return
+		}
+		var body struct {
+			From      string `json:"from"`
+			To        string `json:"to"`
+			Overwrite bool   `json:"overwrite"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+			return
+		}
+		w.Header().Set(auditTargetHeader, body.From+" -> "+body.To)
+		if _, _, err := safeMove(body.From, body.To, r.Header.Get(roleHeader), copyOpts{
+			Overwrite: body.Overwrite,
+		}); err != nil {
+			fsWriteErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}
+}
+
 // fsDeleteHandler does a soft-delete by default: moves the entry into the
 // trash root with metadata so it can be restored. Phase 3 will add
 // `?permanent=true` for an explicit, admin-gated bypass.

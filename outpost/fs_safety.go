@@ -170,6 +170,8 @@ const (
 	FsOpRename   FsOp = "rename"
 	FsOpDelete   FsOp = "delete"
 	FsOpUpload   FsOp = "upload"
+	FsOpCopy     FsOp = "copy"
+	FsOpMove     FsOp = "move"
 )
 
 // rejectSpecialFile checks the dirent kind on a stat result and refuses

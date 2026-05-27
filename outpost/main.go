@@ -1574,6 +1574,8 @@ func localMux() *http.ServeMux {
 	mux.HandleFunc("POST /fs/write", fsWriteHandler())
 	mux.HandleFunc("POST /fs/mkdir", fsMkdirHandler())
 	mux.HandleFunc("POST /fs/rename", fsRenameHandler())
+	mux.HandleFunc("POST /fs/copy", fsCopyHandler())
+	mux.HandleFunc("POST /fs/move", fsMoveHandler())
 	mux.HandleFunc("DELETE /fs/entry", fsDeleteHandler())
 	mux.HandleFunc("POST /fs/upload", fsUploadHandler())
 	mux.HandleFunc("POST /fs/receive", fsReceiveHandler())
