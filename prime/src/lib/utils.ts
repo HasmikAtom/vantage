@@ -166,6 +166,36 @@ export function formatBytesAbs(b: number): string {
   return b + ' B';
 }
 
+/** Cumulative CPU time (seconds) → "MM:SS" or "HH:MM:SS" for ≥1h.
+ *  Matches Glances' TIME+ column: small numbers stay compact, long-running
+ *  daemons get the hour field. We don't include sub-second decimals — at
+ *  multi-minute scales the noise outweighs the precision. */
+export function formatProcTime(sec: number): string {
+  if (!isFinite(sec) || sec < 0) return '—';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${pad(m)}:${pad(s)}`;
+}
+
+/** Single-letter /proc state → human label + color class.
+ *  Glances colors R green (running), D amber (disk-wait), Z red (zombie),
+ *  T amber (stopped); everything else muted. */
+export function processStateMeta(state: string): { label: string; className: string } {
+  switch (state) {
+    case 'R': return { label: 'R', className: 'text-emerald-500' };
+    case 'D': return { label: 'D', className: 'text-warn' };
+    case 'Z': return { label: 'Z', className: 'text-destructive' };
+    case 'T':
+    case 't': return { label: state, className: 'text-warn' };
+    case 'S':
+    case 'I': return { label: state, className: 'text-muted-foreground' };
+    default:  return { label: state || '?', className: 'text-muted-foreground' };
+  }
+}
+
 /** Syslog priority → label + tailwind color class. 0–3 red, 4 amber, rest muted. */
 export function journalSeverity(p: number): { label: string; className: string } {
   if (p <= 3) return { label: ['emerg', 'alert', 'crit', 'err'][p] ?? 'err', className: 'text-destructive' };

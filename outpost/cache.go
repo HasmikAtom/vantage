@@ -421,7 +421,7 @@ func (m *Manager) refreshMedium(ctx context.Context) {
 	}
 	connections := collectConnections(servicesByPort)
 
-	processes := collectTopProcesses(10)
+	processes, procStates := collectTopProcesses(10)
 	updates := collectUpdates()
 
 	journal, jerr := collectJournal(ctx, 50)
@@ -439,6 +439,7 @@ func (m *Manager) refreshMedium(ctx context.Context) {
 	m.snap.DockerDF = dockerDF
 	m.snap.Connections = connections
 	m.snap.Processes = processes
+	m.snap.ProcessStates = procStates
 	m.snap.Updates = updates
 	if jerr == nil {
 		m.snap.Journal = journal

@@ -130,8 +130,10 @@ func readPressure(path, prefix string) PressureLine {
 // ---------------------------------------------------------------------------
 
 type procSample struct {
-	utime uint64 // jiffies in user mode
-	stime uint64 // jiffies in kernel mode
+	utime    uint64 // jiffies in user mode
+	stime    uint64 // jiffies in kernel mode
+	ioRead   uint64 // /proc/[pid]/io read_bytes (cumulative); 0 = unavailable
+	ioWrite  uint64 // /proc/[pid]/io write_bytes (cumulative); 0 = unavailable
 }
 
 var (
@@ -141,11 +143,10 @@ var (
 	clkTck          = float64(100) // kernel CLK_TCK; 100 on virtually every Linux build
 )
 
-// readProcStat returns (uid, utime, stime, threads, comm, rssKB) for a pid.
-// /proc/[pid]/status is read once and scanned for BOTH Uid: and VmRSS:; the
-// previous version opened it twice (once here for UID, once in readProcRSS
-// for VmRSS), doubling syscalls per process on the medium tick.
-func readProcStat(pid int) (uid uint32, sample procSample, threads int, comm string, rssKB int64, ok bool) {
+// readProcStat returns the per-process fields we need from /proc/[pid]/{stat,status,io}.
+// All three pseudo-files are read once each (rather than re-opened per
+// field) — at hundreds of pids per tick the syscall overhead matters.
+func readProcStat(pid int) (uid uint32, sample procSample, threads int, comm string, rssKB int64, vmSizeKB int64, state string, nice int, ok bool) {
 	b, err := os.ReadFile(procPath(strconv.Itoa(pid), "stat"))
 	if err != nil {
 		return
@@ -164,16 +165,18 @@ func readProcStat(pid int) (uid uint32, sample procSample, threads int, comm str
 	if len(tail) < 20 {
 		return
 	}
-	// tail[0]=state, [1]=ppid, [2]=pgrp ... [11]=utime, [12]=stime ... [17]=num_threads
+	// tail[0]=state, [11]=utime, [12]=stime, [16]=nice, [17]=num_threads.
+	state = tail[0]
 	sample.utime, _ = strconv.ParseUint(tail[11], 10, 64)
 	sample.stime, _ = strconv.ParseUint(tail[12], 10, 64)
+	nice, _ = strconv.Atoi(tail[16])
 	threads, _ = strconv.Atoi(tail[17])
 
-	// One pass over /proc/[pid]/status pulls both the real UID and VmRSS.
+	// One pass over /proc/[pid]/status pulls UID, VmRSS, and VmSize.
 	// Status lines aren't ordered relative to each other across kernel
-	// versions, so we keep scanning until we've found both or hit EOF.
+	// versions, so we keep scanning until we've found all three or hit EOF.
 	if sb, err := os.ReadFile(procPath(strconv.Itoa(pid), "status")); err == nil {
-		gotUID, gotRSS := false, false
+		gotUID, gotRSS, gotVm := false, false, false
 		for _, line := range strings.Split(string(sb), "\n") {
 			switch {
 			case !gotUID && strings.HasPrefix(line, "Uid:"):
@@ -189,12 +192,40 @@ func readProcStat(pid int) (uid uint32, sample procSample, threads int, comm str
 					rssKB, _ = strconv.ParseInt(fields[1], 10, 64)
 				}
 				gotRSS = true
+			case !gotVm && strings.HasPrefix(line, "VmSize:"):
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					vmSizeKB, _ = strconv.ParseInt(fields[1], 10, 64)
+				}
+				gotVm = true
 			}
-			if gotUID && gotRSS {
+			if gotUID && gotRSS && gotVm {
 				break
 			}
 		}
 	}
+
+	// /proc/[pid]/io requires CAP_SYS_PTRACE or matching FS creds — when
+	// outpost runs as root this works for every pid, otherwise it silently
+	// fails (errs are swallowed; the resulting zero counters mean we won't
+	// publish a delta and the UI shows "—").
+	if iob, err := os.ReadFile(procPath(strconv.Itoa(pid), "io")); err == nil {
+		for _, line := range strings.Split(string(iob), "\n") {
+			switch {
+			case strings.HasPrefix(line, "read_bytes:"):
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					sample.ioRead, _ = strconv.ParseUint(fields[1], 10, 64)
+				}
+			case strings.HasPrefix(line, "write_bytes:"):
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					sample.ioWrite, _ = strconv.ParseUint(fields[1], 10, 64)
+				}
+			}
+		}
+	}
+
 	ok = true
 	return
 }
@@ -249,11 +280,14 @@ func uidToName(uid uint32) string {
 }
 
 // collectTopProcesses returns the top N processes by CPU% and by RSS, deduped
-// into a single list sorted by CPU desc.
-func collectTopProcesses(top int) []ProcessInfo {
+// into a single list sorted by CPU desc. The second return is the aggregate
+// state-count summary tallied while iterating every PID (running/sleeping/
+// zombie/etc.) — produced for free since we already opened every stat file.
+func collectTopProcesses(top int) ([]ProcessInfo, ProcessStates) {
+	var states ProcessStates
 	entries, err := os.ReadDir(procPath())
 	if err != nil {
-		return nil
+		return nil, states
 	}
 	now := time.Now()
 
@@ -264,12 +298,18 @@ func collectTopProcesses(top int) []ProcessInfo {
 	procSampleMu.Unlock()
 
 	type row struct {
-		pid     int
-		uid     uint32
-		name    string
-		threads int
-		rssKB   int64
-		cpuPct  float64
+		pid      int
+		uid      uint32
+		name     string
+		threads  int
+		rssKB    int64
+		vmKB     int64
+		state    string
+		nice     int
+		cpuPct   float64
+		timeSec  float64
+		ioReadBps  *float64
+		ioWriteBps *float64
 	}
 	var rows []row
 
@@ -283,27 +323,63 @@ func collectTopProcesses(top int) []ProcessInfo {
 		if err != nil {
 			continue
 		}
-		uid, sample, threads, name, rssKB, ok := readProcStat(pid)
+		uid, sample, threads, name, rssKB, vmKB, state, nice, ok := readProcStat(pid)
 		if !ok {
 			continue
 		}
 		curSamples[pid] = sample
 
+		// Tally state counts across every reachable PID before any top-N
+		// filtering — Glances' "342 sleeping · 3 running · 1 zombie" line.
+		states.Total++
+		states.Threads += threads
+		switch state {
+		case "R":
+			states.Running++
+		case "S", "I":
+			// 'I' = kernel idle threads (kworker etc.); rolling them into
+			// "sleeping" matches how `ps` and Glances bucket them.
+			states.Sleeping++
+		case "D":
+			states.DiskWait++
+		case "T", "t":
+			states.Stopped++
+		case "Z":
+			states.Zombie++
+		}
+
 		cpu := 0.0
+		var ioR, ioW *float64
 		if p, ok := prev[pid]; ok && !prevT.IsZero() {
 			deltaJiffies := float64((sample.utime + sample.stime) - (p.utime + p.stime))
 			cpu = 100 * (deltaJiffies / clkTck) / dt
 			if cpu < 0 {
 				cpu = 0
 			}
+			// I/O rates only when both samples have non-zero counters
+			// (zero = /proc/[pid]/io was unreadable on either tick).
+			if sample.ioRead > 0 && p.ioRead > 0 && sample.ioRead >= p.ioRead {
+				r := float64(sample.ioRead-p.ioRead) / dt
+				ioR = &r
+			}
+			if sample.ioWrite > 0 && p.ioWrite > 0 && sample.ioWrite >= p.ioWrite {
+				w := float64(sample.ioWrite-p.ioWrite) / dt
+				ioW = &w
+			}
 		}
 		rows = append(rows, row{
-			pid:     pid,
-			uid:     uid,
-			name:    name,
-			threads: threads,
-			rssKB:   rssKB,
-			cpuPct:  cpu,
+			pid:        pid,
+			uid:        uid,
+			name:       name,
+			threads:    threads,
+			rssKB:      rssKB,
+			vmKB:       vmKB,
+			state:      state,
+			nice:       nice,
+			cpuPct:     cpu,
+			timeSec:    float64(sample.utime+sample.stime) / clkTck,
+			ioReadBps:  ioR,
+			ioWriteBps: ioW,
 		})
 	}
 
@@ -331,13 +407,19 @@ func collectTopProcesses(top int) []ProcessInfo {
 	out := make([]ProcessInfo, 0, len(chosen))
 	for _, r := range chosen {
 		out = append(out, ProcessInfo{
-			PID:     r.pid,
-			Name:    r.name,
-			User:    uidToName(r.uid),
-			CPU:     roundTo(r.cpuPct, 1),
-			MemMB:   roundTo(float64(r.rssKB)/1024, 1),
-			Cmd:     readProcCmdline(r.pid),
-			Threads: r.threads,
+			PID:        r.pid,
+			Name:       r.name,
+			User:       uidToName(r.uid),
+			CPU:        roundTo(r.cpuPct, 1),
+			MemMB:      roundTo(float64(r.rssKB)/1024, 1),
+			VirtMB:     roundTo(float64(r.vmKB)/1024, 1),
+			Cmd:        readProcCmdline(r.pid),
+			Threads:    r.threads,
+			State:      r.state,
+			Nice:       r.nice,
+			TimeSec:    roundTo(r.timeSec, 1),
+			IoReadBps:  r.ioReadBps,
+			IoWriteBps: r.ioWriteBps,
 		})
 	}
 	// Final sort by CPU desc so the UI doesn't have to.
@@ -347,7 +429,7 @@ func collectTopProcesses(top int) []ProcessInfo {
 		}
 		return out[i].MemMB > out[j].MemMB
 	})
-	return out
+	return out, states
 }
 
 // ---------------------------------------------------------------------------

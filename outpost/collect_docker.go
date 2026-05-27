@@ -15,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +28,24 @@ type dockerClient struct {
 	http *http.Client
 	cmd  *http.Client
 	sock string
+
+	// prevStats holds the previous-tick stats sample for each running
+	// container, keyed by container ID. Docker's stats endpoint returns
+	// cumulative byte counters for block I/O and per-interface network,
+	// but no "pre" snapshot the way it does for CPU — so we compute rates
+	// ourselves by diffing successive samples. Entries belonging to
+	// containers that have since stopped get evicted on the next
+	// collectContainers tick (we only write IDs we just saw).
+	statsMu  sync.Mutex
+	prevStats map[string]prevStatSample
+}
+
+type prevStatSample struct {
+	at         time.Time
+	blkRead    uint64
+	blkWrite   uint64
+	netRx      uint64
+	netTx      uint64
 }
 
 // ErrDockerNotFound is the sentinel error from a write command when the
@@ -71,6 +90,7 @@ func newDockerClient() *dockerClient {
 			},
 			// Timeout deliberately unset — see struct comment.
 		},
+		prevStats: make(map[string]prevStatSample),
 	}
 }
 
@@ -740,6 +760,11 @@ type containerListItem struct {
 
 // /containers/{id}/stats?stream=false
 type dockerStats struct {
+	// Read is the snapshot timestamp Docker assigns server-side. Using it
+	// (rather than wall-clock at collector receive time) means our rate
+	// math is over the exact same interval Docker measured the counters
+	// over — no skew from network/dispatch latency on either end.
+	Read     time.Time `json:"read"`
 	CPUStats struct {
 		CPUUsage struct {
 			TotalUsage uint64 `json:"total_usage"`
@@ -760,6 +785,50 @@ type dockerStats struct {
 			InactiveFile  uint64 `json:"inactive_file"`
 		} `json:"stats"`
 	} `json:"memory_stats"`
+	// Block I/O — cgroup v1 surfaces io_service_bytes_recursive; on cgroup
+	// v2 hosts Docker still emits the same shape (synthesized from
+	// io.stat). Op is "Read" / "Write" / "Sync" / "Async" / "Total" — we
+	// only sum Read and Write so we don't double-count via Total.
+	BlkioStats struct {
+		IoServiceBytesRecursive []struct {
+			Op    string `json:"op"`
+			Value uint64 `json:"value"`
+		} `json:"io_service_bytes_recursive"`
+	} `json:"blkio_stats"`
+	// Networks is keyed by interface name (eth0, lo, etc.). Missing entirely
+	// for containers using host networking — those will report nil rates.
+	Networks map[string]struct {
+		RxBytes uint64 `json:"rx_bytes"`
+		TxBytes uint64 `json:"tx_bytes"`
+	} `json:"networks"`
+}
+
+// blkBytes sums io_service_bytes_recursive entries whose op matches the
+// requested direction. Docker emits both "Read" and "read" (depending on
+// engine version + cgroup driver) so we compare case-insensitively.
+func (s *dockerStats) blkBytes(op string) uint64 {
+	var total uint64
+	for _, e := range s.BlkioStats.IoServiceBytesRecursive {
+		if strings.EqualFold(e.Op, op) {
+			total += e.Value
+		}
+	}
+	return total
+}
+
+// netBytes sums rx or tx across every interface in the container's network
+// namespace. Glances reports the same aggregate — per-interface only
+// matters for the network tab, not the overview row.
+func (s *dockerStats) netBytes(rx bool) uint64 {
+	var total uint64
+	for _, n := range s.Networks {
+		if rx {
+			total += n.RxBytes
+		} else {
+			total += n.TxBytes
+		}
+	}
+	return total
 }
 
 func (s *dockerStats) cpuPercent() float64 {
@@ -1132,16 +1201,60 @@ func (m *Manager) collectContainers(ctx context.Context) ([]Container, error) {
 
 	hostPortToContainer := map[int]string{}
 	out := make([]Container, 0, len(list))
+	// Build the next-tick prev-stats map alongside Container construction
+	// so we don't iterate `list` twice and so eviction of stopped containers
+	// is implicit — anything not assigned here disappears from the cache.
+	nextPrev := make(map[string]prevStatSample, len(list))
+	m.docker.statsMu.Lock()
+	prevSnapshot := m.docker.prevStats
+	m.docker.statsMu.Unlock()
 	for i, it := range list {
 		name := "?"
 		if len(it.Names) > 0 {
 			name = strings.TrimPrefix(it.Names[0], "/")
 		}
 		var cpuPtr, memPtr *float64
+		var blkReadPtr, blkWritePtr, netRxPtr, netTxPtr *float64
 		if stats[i] != nil {
 			c := roundTo(stats[i].cpuPercent(), 1)
 			mem := roundTo(stats[i].memMB(), 1)
 			cpuPtr, memPtr = &c, &mem
+			// Capture current cumulative counters; they go into the next
+			// prev snapshot regardless of whether we have a baseline to
+			// compute against (so the next tick has something to diff).
+			cur := prevStatSample{
+				at:       stats[i].Read,
+				blkRead:  stats[i].blkBytes("Read"),
+				blkWrite: stats[i].blkBytes("Write"),
+				netRx:    stats[i].netBytes(true),
+				netTx:    stats[i].netBytes(false),
+			}
+			if cur.at.IsZero() {
+				// Older docker daemons can omit `read`; fall back to local
+				// time so the next tick still has a usable interval.
+				cur.at = time.Now()
+			}
+			nextPrev[it.ID] = cur
+			if prev, ok := prevSnapshot[it.ID]; ok {
+				dt := cur.at.Sub(prev.at).Seconds()
+				if dt > 0.1 {
+					// Counters can briefly go backwards when docker re-attaches
+					// to a restarted netns or when cgroup accounting resets
+					// — treat that as zero rather than a huge negative spike.
+					if r := safeRate(cur.blkRead, prev.blkRead, dt); r >= 0 {
+						blkReadPtr = &r
+					}
+					if w := safeRate(cur.blkWrite, prev.blkWrite, dt); w >= 0 {
+						blkWritePtr = &w
+					}
+					if rx := safeRate(cur.netRx, prev.netRx, dt); rx >= 0 {
+						netRxPtr = &rx
+					}
+					if tx := safeRate(cur.netTx, prev.netTx, dt); tx >= 0 {
+						netTxPtr = &tx
+					}
+				}
+			}
 		}
 		// Docker lists ports per protocol-family (v4 + v6) so the same
 		// publication shows up twice; dedupe on the canonical "public:private".
@@ -1164,14 +1277,18 @@ func (m *Manager) collectContainers(ctx context.Context) ([]Container, error) {
 			ports = append(ports, s)
 		}
 		out = append(out, Container{
-			ID:     it.ID,
-			Name:   name,
-			Status: it.State,
-			Uptime: humanUptime(it.Status),
-			CPU:    cpuPtr,
-			Mem:    memPtr,
-			Image:  it.Image,
-			Ports:  ports,
+			ID:          it.ID,
+			Name:        name,
+			Status:      it.State,
+			Uptime:      humanUptime(it.Status),
+			CPU:         cpuPtr,
+			Mem:         memPtr,
+			BlkReadBps:  blkReadPtr,
+			BlkWriteBps: blkWritePtr,
+			NetRxBps:    netRxPtr,
+			NetTxBps:    netTxPtr,
+			Image:       it.Image,
+			Ports:       ports,
 			// Compose tags every container it creates with these labels —
 			// empty strings when the container was started outside compose.
 			Stack:            it.Labels["com.docker.compose.project"],
@@ -1180,7 +1297,24 @@ func (m *Manager) collectContainers(ctx context.Context) ([]Container, error) {
 		})
 	}
 	setDockerHostPortMap(hostPortToContainer)
+	m.docker.statsMu.Lock()
+	m.docker.prevStats = nextPrev
+	m.docker.statsMu.Unlock()
 	return out, nil
+}
+
+// safeRate computes (cur - prev) / dt with bounds-checking. Returns -1 if
+// the counter went backwards (docker reset / netns re-attach / container
+// restarted between samples) so the caller can drop the data point rather
+// than reporting a spurious negative rate or astronomical positive one.
+func safeRate(cur, prev uint64, dt float64) float64 {
+	if cur < prev {
+		return -1
+	}
+	if dt <= 0 {
+		return -1
+	}
+	return float64(cur-prev) / dt
 }
 
 // humanUptime extracts the relative uptime suffix from a docker Status string

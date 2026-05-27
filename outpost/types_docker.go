@@ -13,6 +13,13 @@ type Container struct {
 	Mem    *float64 `json:"mem"`
 	Image  string   `json:"image"`
 	Ports  []string `json:"ports"`
+	// Per-container live throughput rates, computed as deltas against the
+	// previous stats sample for the same container. nil until a second
+	// sample arrives (no baseline → no rate). Bytes/sec.
+	BlkReadBps  *float64 `json:"blkReadBps"`
+	BlkWriteBps *float64 `json:"blkWriteBps"`
+	NetRxBps    *float64 `json:"netRxBps"`
+	NetTxBps    *float64 `json:"netTxBps"`
 	// Stack is the compose project name this container belongs to, taken from
 	// the `com.docker.compose.project` label. Empty for containers created
 	// outside compose (e.g. `docker run` or the Phase 5a form). Used by the

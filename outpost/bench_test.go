@@ -119,11 +119,11 @@ func BenchmarkReadDiskstats(b *testing.B) {
 // the medium-tick collectors because it walks /proc and opens up to three
 // files per process.
 func BenchmarkCollectTopProcesses(b *testing.B) {
-	_ = collectTopProcesses(10) // prime sample state
+	_, _ = collectTopProcesses(10) // prime sample state
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = collectTopProcesses(10)
+		_, _ = collectTopProcesses(10)
 	}
 }
 

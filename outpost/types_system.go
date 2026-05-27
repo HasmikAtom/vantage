@@ -128,13 +128,36 @@ type Service struct {
 // ---------------------------------------------------------------------------
 
 type ProcessInfo struct {
-	PID      int     `json:"pid"`
-	Name     string  `json:"name"`
-	User     string  `json:"user"`
-	CPU      float64 `json:"cpu"`   // %
-	MemMB    float64 `json:"memMb"` // RSS MiB
-	Cmd      string  `json:"cmd"`
-	Threads  int     `json:"threads"`
+	PID     int     `json:"pid"`
+	Name    string  `json:"name"`
+	User    string  `json:"user"`
+	CPU     float64 `json:"cpu"`     // %
+	MemMB   float64 `json:"memMb"`   // RSS MiB
+	VirtMB  float64 `json:"virtMb"`  // VmSize MiB (virtual memory)
+	Cmd     string  `json:"cmd"`
+	Threads int     `json:"threads"`
+	// State is the single-letter /proc/[pid]/stat state (R=running,
+	// S=sleeping, D=disk-sleep, Z=zombie, T=stopped, t=traced, I=idle).
+	State    string  `json:"state"`
+	Nice     int     `json:"nice"`
+	TimeSec  float64 `json:"timeSec"` // cumulative user+sys CPU time (TIME+)
+	// Per-process disk I/O rates. nil if /proc/[pid]/io can't be read
+	// (insufficient privilege) or this is the first sample for the pid.
+	IoReadBps  *float64 `json:"ioReadBps"`
+	IoWriteBps *float64 `json:"ioWriteBps"`
+}
+
+// ProcessStates is the running/sleeping/zombie/etc. count summary Glances
+// shows at the top of its task table. Tallied while collectTopProcesses
+// already has every /proc/[pid]/stat open, so it's effectively free.
+type ProcessStates struct {
+	Total    int `json:"total"`
+	Running  int `json:"running"`
+	Sleeping int `json:"sleeping"`
+	DiskWait int `json:"diskWait"` // 'D' — uninterruptible sleep, usually I/O
+	Stopped  int `json:"stopped"`  // 'T' / 't'
+	Zombie   int `json:"zombie"`
+	Threads  int `json:"threads"` // sum of thread counts across all procs
 }
 
 // ---------------------------------------------------------------------------

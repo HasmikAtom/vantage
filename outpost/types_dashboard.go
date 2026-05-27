@@ -17,6 +17,7 @@ type DashboardSnapshot struct {
 	Ports       []Port         `json:"ports"`
 	// New:
 	Processes     []ProcessInfo  `json:"processes"`
+	ProcessStates ProcessStates  `json:"processStates"`
 	Cores         []CoreUsage    `json:"cores"`
 	Pressure      Pressure       `json:"pressure"`
 	DiskIO        []DiskIO       `json:"diskIo"`

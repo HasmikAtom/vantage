@@ -215,6 +215,12 @@ export interface Container {
   uptime: string;
   cpu: number | null;
   mem: number | null;
+  // Per-container throughput, bytes/sec. null on the first tick after a
+  // container starts (no baseline yet) and for non-running containers.
+  blkReadBps: number | null;
+  blkWriteBps: number | null;
+  netRxBps: number | null;
+  netTxBps: number | null;
   image: string;
   ports: string[];
   stack: string;            // compose project name, empty when container is non-compose
@@ -416,7 +422,27 @@ export interface ProcessInfo {
   user: string;
   cpu: number;
   memMb: number;
+  virtMb: number;
   cmd: string;
+  threads: number;
+  // /proc state letter: R running, S sleeping, D disk-wait, Z zombie, T/t stopped, I idle.
+  state: string;
+  nice: number;
+  // Cumulative user+sys CPU time in seconds (Glances TIME+ column).
+  timeSec: number;
+  // Per-process disk I/O rate (bytes/sec). null when /proc/[pid]/io is
+  // unreadable or there's no baseline sample yet.
+  ioReadBps: number | null;
+  ioWriteBps: number | null;
+}
+
+export interface ProcessStates {
+  total: number;
+  running: number;
+  sleeping: number;
+  diskWait: number;
+  stopped: number;
+  zombie: number;
   threads: number;
 }
 
@@ -604,6 +630,7 @@ export interface DashboardSnapshot {
   services: Service[];
   ports: Port[];
   processes: ProcessInfo[];
+  processStates: ProcessStates;
   cores: CoreUsage[];
   pressure: Pressure;
   diskIo: DiskIO[];
