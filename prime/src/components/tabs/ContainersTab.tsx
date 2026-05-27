@@ -343,15 +343,32 @@ export const ContainersTab = ({ snapshot, tt, serverId, serverHost }: Containers
             ) : (
               c.ports.map((p) => {
                 const portURL = containerPortURL(p, serverHost);
+                // "host:container" → split so we can emphasize the
+                // browser-reachable (host) port. Bare "1234" means the
+                // port isn't published — render unchanged + muted.
+                const idx = p.indexOf(':');
+                const hostPort = idx >= 0 ? p.slice(0, idx) : '';
+                const innerPort = idx >= 0 ? p.slice(idx + 1) : p;
+                const labelTitle = idx >= 0
+                  ? `host port ${hostPort} → container port ${innerPort}`
+                  : `container port ${innerPort} · not published to host`;
+                const label = idx >= 0 ? (
+                  <>
+                    <span className="font-semibold text-foreground">{hostPort}</span>
+                    <span className="text-muted-foreground/60">:{innerPort}</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">{innerPort}</span>
+                );
                 return portURL ? (
                   <a key={p} href={portURL} target="_blank" rel="noreferrer noopener" title={portURL}>
                     <Badge variant="muted" className="rounded-sm hover:bg-foreground/10 cursor-pointer">
-                      {p}
+                      {label}
                     </Badge>
                   </a>
                 ) : (
-                  <Badge key={p} variant="muted" className="rounded-sm" title="not published to host">
-                    {p}
+                  <Badge key={p} variant="muted" className="rounded-sm" title={labelTitle}>
+                    {label}
                   </Badge>
                 );
               })

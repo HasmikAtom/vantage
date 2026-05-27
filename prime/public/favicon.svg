@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="#16a34a">
+  <title>Vantage</title>
+  <path d="M 100 14 L 174 57 L 174 143 L 150 130 L 150 70 L 122 50 Z"/>
+  <path d="M 100 14 L 174 57 L 174 143 L 150 130 L 150 70 L 122 50 Z" transform="rotate(120 100 100)"/>
+  <path d="M 100 14 L 174 57 L 174 143 L 150 130 L 150 70 L 122 50 Z" transform="rotate(240 100 100)"/>
+  <path d="M 66 72 L 92 142 L 108 142 L 134 72 L 118 72 L 100 108 L 82 72 Z"/>
+</svg>
