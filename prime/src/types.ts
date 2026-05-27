@@ -580,6 +580,18 @@ export interface FirewallStatus {
   rules: FirewallRule[];
 }
 
+export interface AlertEvent {
+  id: string;            // stable: "<metric>:<beganAt-unix>"
+  metric: string;        // "cpu" | "mem" | "swap" | "load" | "fs:/mnt" | "sensor:<id>"
+  label: string;         // human label
+  severity: 'warning' | 'critical';
+  beganAt: string;       // RFC3339
+  endedAt?: string;      // empty when still open
+  threshold: number;
+  peak: number;
+  unit: string;          // "%" | "°C" | ""
+}
+
 export interface DashboardSnapshot {
   system: SystemInfo;
   headline: Headline;
@@ -600,4 +612,5 @@ export interface DashboardSnapshot {
   updates: UpdateInfo;
   journal: JournalEntry[];
   users: UsersInfo;
+  alerts: AlertEvent[];
 }

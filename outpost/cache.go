@@ -59,6 +59,9 @@ type Manager struct {
 	// wait for HTTP readers holding mu.RLock on Snapshot().
 	subsMu sync.Mutex
 	subs   map[*subscription]struct{}
+	// alerts holds threshold-crossing event state across collector ticks.
+	// Self-locking; lock order if both are held: m.mu first, then alerts.mu.
+	alerts *alertEngine
 }
 
 // subscription is a single SSE (or other long-lived) client's update channel.
@@ -128,6 +131,7 @@ func NewManager() *Manager {
 		tunnelTick: make(chan struct{}, 1),
 		medSignal:  make(chan struct{}, 1),
 		slowSignal: make(chan struct{}, 1),
+		alerts:     newAlertEngine(),
 		// Initialise every slice to non-nil so Go's json.Marshal emits "[]"
 		// instead of "null". The frontend doesn't expect nullable arrays.
 		snap: DashboardSnapshot{
@@ -146,6 +150,7 @@ func NewManager() *Manager {
 			Journal:     []JournalEntry{},
 			Updates:     UpdateInfo{RebootPkgs: []string{}},
 			Users:       UsersInfo{Users: []User{}, Groups: []Group{}},
+			Alerts:      []AlertEvent{},
 		},
 	}
 }
@@ -385,6 +390,9 @@ func (m *Manager) refreshFast(ctx context.Context) {
 			m.snap.Disks[i].Writes = roundTo(io.WriteBps/1024/1024, 2)
 		}
 	}
+	// Threshold evaluation runs against the snapshot we just committed.
+	// Locking order: m.mu (already held) → alerts.mu (acquired inside).
+	m.snap.Alerts = m.alerts.Evaluate(&m.snap)
 	m.version++
 	m.mu.Unlock()
 	m.notify()
@@ -435,6 +443,7 @@ func (m *Manager) refreshMedium(ctx context.Context) {
 	if jerr == nil {
 		m.snap.Journal = journal
 	}
+	m.snap.Alerts = m.alerts.Evaluate(&m.snap)
 	m.version++
 	m.mu.Unlock()
 	m.notify()
@@ -476,6 +485,7 @@ func (m *Manager) refreshSlow(ctx context.Context) {
 		m.snap.Disks = disks
 	}
 	m.snap.Users = users
+	m.snap.Alerts = m.alerts.Evaluate(&m.snap)
 	m.version++
 	m.mu.Unlock()
 	m.notify()
