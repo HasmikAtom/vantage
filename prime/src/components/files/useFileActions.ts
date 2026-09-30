@@ -16,6 +16,7 @@ import { baseName, copyName, joinPath, parentOf } from './fsPath';
 import { fetchListing } from './hooks/useDirListing';
 import type { RunBulk } from './hooks/useBulkRunner';
 import { isConflict } from './logic/bulk';
+import { preflightConflict } from './logic/conflicts';
 import { clipboardStore, planPaste, type FsClipboard } from './logic/clipboard';
 import { canDropInto } from './logic/dnd';
 import { joinRel, type UploadPlan } from './logic/upload';
@@ -47,13 +48,17 @@ export interface FileActions {
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-async function takenNames(serverId: string, dir: string): Promise<Set<string>> {
+async function existingEntries(serverId: string, dir: string): Promise<Map<string, FsEntry['type']>> {
   try {
     const l = await fetchListing(serverId, dir, true);
-    return new Set(l.entries.map((e) => e.name));
+    return new Map(l.entries.map((e) => [e.name, e.type]));
   } catch {
-    return new Set();
+    return new Map();
   }
+}
+
+async function takenNames(serverId: string, dir: string): Promise<Set<string>> {
+  return new Set((await existingEntries(serverId, dir)).keys());
 }
 
 export function createFileActions(d: FileActionsDeps): FileActions {
@@ -64,13 +69,17 @@ export function createFileActions(d: FileActionsDeps): FileActions {
     ops: readonly { from: string; to: string; isDir: boolean; mode: 'copy' | 'move' }[],
     targetDir: string,
   ) => {
-    const taken = await takenNames(serverId, targetDir);
+    const existing = await existingEntries(serverId, targetDir);
+    const taken = new Set(existing.keys());
     const byId = new Map(ops.map((o) => [o.from, o]));
     await runBulk(
       title,
       ops.map((o) => ({ id: o.from, label: baseName(o.from) })),
       async (item, opts) => {
         const o = byId.get(item.id)!;
+        const pre = preflightConflict(o.isDir, existing.get(baseName(o.to)), opts);
+        if (pre === 'conflict') throw Object.assign(new Error('destination exists'), { status: 409 });
+        if (pre === 'cannot-replace-folder') throw new Error("Folders can't be replaced — choose Keep both or Skip");
         let to = o.to;
         if (opts.keepBoth) {
           const name = copyName(baseName(o.to), o.isDir, taken);

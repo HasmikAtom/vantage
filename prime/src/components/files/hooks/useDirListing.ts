@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { fsList } from '@/api';
 import type { FsListResponse } from '@/types';
+import { seedListing } from '../logic/listing';
 
 // Listing cache shared by the main list and the sidebar tree. The main
 // list shows a cached listing immediately and always revalidates; the tree
@@ -34,18 +35,25 @@ export function useDirListing(serverId: string, path: string): DirListing {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<unknown>(null);
   const seq = React.useRef(0);
+  const shown = React.useRef<{ key: string; data: FsListResponse | null }>({ key: '', data: null });
 
   const load = React.useCallback(async () => {
     const my = ++seq.current;
-    const cached = cache.get(key(serverId, path));
-    setData(cached ?? null);
+    const k = key(serverId, path);
+    const seed = seedListing(shown.current, k, cache.get(k));
+    shown.current = { key: k, data: seed };
+    setData(seed);
     setLoading(true);
     setError(null);
     try {
       const r = await fetchListing(serverId, path, true);
-      if (my === seq.current) setData(r);
+      if (my === seq.current) {
+        shown.current = { key: k, data: r };
+        setData(r);
+      }
     } catch (e) {
       if (my === seq.current) {
+        shown.current = { key: k, data: null };
         setData(null);
         setError(e);
       }

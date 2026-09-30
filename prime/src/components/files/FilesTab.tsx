@@ -17,6 +17,7 @@ import { EDITOR_MAX_BYTES, parentOf } from './fsPath';
 import { backgroundMenu, itemMenu, type MenuCtx } from './menus';
 import { useFileActions } from './useFileActions';
 import { collectDropped } from './dropUpload';
+import { installFileDropGuard } from './dropGuard';
 import { PIN_TARGET, useDnd } from './useDnd';
 import { useBulkRunner } from './hooks/useBulkRunner';
 import { useClipboard } from './hooks/useClipboard';
@@ -129,6 +130,8 @@ export function FilesTab({ serverId }: FilesTabProps) {
   React.useEffect(() => {
     uploadFolderRef.current?.setAttribute('webkitdirectory', '');
   }, []);
+
+  React.useEffect(() => installFileDropGuard(window), []);
 
   // --- listing, sizes, ordering -------------------------------------------
   const entries = React.useMemo(() => data?.entries ?? [], [data]);
