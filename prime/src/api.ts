@@ -598,14 +598,40 @@ export function fsUpload(
   destDir: string,
   file: File,
   overrideName?: string,
+  opts: { overwrite?: boolean } = {},
 ): Promise<void> {
   const form = new FormData();
   form.append('file', file, overrideName || file.name);
   const qs = new URLSearchParams({ path: destDir });
   if (overrideName) qs.set('name', overrideName);
+  if (opts.overwrite) qs.set('overwrite', 'true');
   return apiFetch<void>(`${serverBase(serverId)}/fs/upload?${qs.toString()}`, {
     method: 'POST',
     rawBody: form,
+  });
+}
+
+// fsSizesURL is the SSE stream of recursive folder sizes for the
+// immediate subfolders of `path` (outpost GET /fs/sizes).
+export function fsSizesURL(serverId: string, path: string): string {
+  return `${serverBase(serverId)}/fs/sizes?path=${encodeURIComponent(path)}`;
+}
+
+// -- Pinned folders (Files sidebar) — stored per user, per server in gate.
+
+export interface FsPin {
+  path: string;
+  label: string | null;
+}
+
+export function fetchPins(serverId: string): Promise<FsPin[]> {
+  return apiFetch<FsPin[]>(`${BASE}/pins/${encodeURIComponent(serverId)}`);
+}
+
+export function savePins(serverId: string, pins: FsPin[]): Promise<FsPin[]> {
+  return apiFetch<FsPin[]>(`${BASE}/pins/${encodeURIComponent(serverId)}`, {
+    method: 'PUT',
+    json: { pins },
   });
 }
 

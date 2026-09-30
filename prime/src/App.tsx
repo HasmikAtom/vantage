@@ -172,7 +172,10 @@ function Dashboard({ userEmail }: { userEmail: string }) {
   // (or with a garbage one), write the resolved tab back so the URL is a
   // shareable, accurate reflection of the visible state.
   React.useEffect(() => {
-    if (window.location.hash !== `#${tab}`) {
+    // Keep per-tab state after the colon (e.g. "#files:/var/log"); only
+    // rewrite when the tab part itself is missing or wrong.
+    const current = window.location.hash.replace(/^#/, '').split(':')[0] ?? '';
+    if (current !== tab) {
       window.history.replaceState(null, '', `#${tab}`);
     }
     // tab is captured at mount on purpose — this effect only fires once;
