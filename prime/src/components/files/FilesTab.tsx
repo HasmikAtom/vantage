@@ -16,6 +16,8 @@ import { Toolbar } from './Toolbar';
 import { EDITOR_MAX_BYTES, parentOf } from './fsPath';
 import { backgroundMenu, itemMenu, type MenuCtx } from './menus';
 import { useFileActions } from './useFileActions';
+import { collectDropped } from './dropUpload';
+import { PIN_TARGET, useDnd } from './useDnd';
 import { useBulkRunner } from './hooks/useBulkRunner';
 import { useClipboard } from './hooks/useClipboard';
 import { fetchListing, invalidateListings, useDirListing } from './hooks/useDirListing';
@@ -191,6 +193,20 @@ export function FilesTab({ serverId }: FilesTabProps) {
   const { runBulk, dialogs: bulkDialogs } = useBulkRunner(React.useCallback(() => void refreshCurrent(), [refreshCurrent]));
   const onError = React.useCallback((m: string) => setBanner(m), []);
   const actions = useFileActions({ serverId, runBulk, afterMutation, onError, onTransferStarted: upsertTransfer });
+  const dnd = useDnd({
+    serverId,
+    canControl,
+    dragItems: (entry) => (sel.selected.has(entry.path) ? selected : [entry]),
+    onInternalDrop: (paths, dir, mode) =>
+      void actions.transfer(paths.map((p) => ({ path: p, isDir: byPath.get(p)?.type === 'dir' })), dir, mode),
+    onExternalDrop: (dt, dir) => {
+      collectDropped(dt).then(
+        (plan) => void actions.upload(plan, dir),
+        (e: unknown) => setBanner(`Could not read the dropped items: ${e instanceof Error ? e.message : String(e)}`),
+      );
+    },
+    onPinDrop: (dirs) => void savePins(dirs.reduce(addPin, pins)),
+  });
 
   // --- commands ---------------------------------------------------------------
   const open = React.useCallback(
@@ -439,6 +455,10 @@ export function FilesTab({ serverId }: FilesTabProps) {
                 setSidebarOpen(false);
                 nav.go(p);
               }}
+              dropPropsFor={dnd.dropPropsFor}
+              pinDropProps={dnd.pinDropProps}
+              dropTarget={dnd.dropTarget}
+              pinDropActive={dnd.dropTarget === PIN_TARGET}
             />
           </aside>
           <div
@@ -459,6 +479,8 @@ export function FilesTab({ serverId }: FilesTabProps) {
               validate={validatePath}
               editSignal={editAddress}
               onToggleSidebar={() => setSidebarOpen((v) => !v)}
+              dropPropsFor={dnd.dropPropsFor}
+              dropTarget={dnd.dropTarget}
             />
             <Toolbar
               canControl={canControl}
@@ -504,6 +526,10 @@ export function FilesTab({ serverId }: FilesTabProps) {
               onUp={() => nav.go(parentOf(nav.path))}
               onContextMenu={(ev, entry) => openMenu(ev.clientX, ev.clientY, entry)}
               onBackgroundClick={() => dispatch({ type: 'clear' })}
+              dragPropsFor={dnd.dragPropsFor}
+              dropPropsFor={dnd.dropPropsFor}
+              dropTarget={dnd.dropTarget}
+              currentDir={nav.path}
             />
             <StatusBar
               count={visible.length}
