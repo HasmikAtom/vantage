@@ -199,6 +199,25 @@ server {
         proxy_send_timeout 1d;
     }
 
+    # Folder-size stream for the Files tab (SSE). Same unbuffered shape as
+    # the dashboard stream; a walk can run for tens of seconds per folder.
+    location ~ ^/api/servers/[^/]+/fs/sizes$ {
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_cache        off;
+        chunked_transfer_encoding off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+
     # Per-container log tail (SSE). Same long-lived / unbuffered shape as
     # the dashboard stream above — duplicated rather than merged because
     # the location patterns can't be combined without giving up nginx's

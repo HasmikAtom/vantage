@@ -1568,25 +1568,28 @@ func localMux() *http.ServeMux {
 	// safe* helpers in fs_safety_at.go, which also apply the denylist
 	// and role rules.
 	mux.HandleFunc("GET /fs/list", fsListHandler())
+	// Folder sizes stream (SSE) — walked asynchronously after a listing.
+	mux.HandleFunc("GET /fs/sizes", fsSizesHandler())
 	mux.HandleFunc("GET /fs/stat", fsStatHandler())
 	mux.HandleFunc("GET /fs/read", fsReadHandler())
 	mux.HandleFunc("GET /fs/download", fsDownloadHandler())
-	mux.HandleFunc("POST /fs/write", fsWriteHandler())
-	mux.HandleFunc("POST /fs/mkdir", fsMkdirHandler())
-	mux.HandleFunc("POST /fs/rename", fsRenameHandler())
-	mux.HandleFunc("POST /fs/copy", fsCopyHandler())
-	mux.HandleFunc("POST /fs/move", fsMoveHandler())
-	mux.HandleFunc("DELETE /fs/entry", fsDeleteHandler())
-	mux.HandleFunc("POST /fs/upload", fsUploadHandler())
-	mux.HandleFunc("POST /fs/receive", fsReceiveHandler())
+	// Mutating routes clear the folder-size cache on success.
+	mux.HandleFunc("POST /fs/write", invalidatesSizes(fsWriteHandler()))
+	mux.HandleFunc("POST /fs/mkdir", invalidatesSizes(fsMkdirHandler()))
+	mux.HandleFunc("POST /fs/rename", invalidatesSizes(fsRenameHandler()))
+	mux.HandleFunc("POST /fs/copy", invalidatesSizes(fsCopyHandler()))
+	mux.HandleFunc("POST /fs/move", invalidatesSizes(fsMoveHandler()))
+	mux.HandleFunc("DELETE /fs/entry", invalidatesSizes(fsDeleteHandler()))
+	mux.HandleFunc("POST /fs/upload", invalidatesSizes(fsUploadHandler()))
+	mux.HandleFunc("POST /fs/receive", invalidatesSizes(fsReceiveHandler()))
 	// Trash management — listing + restore are operator+; permanent
 	// delete is admin (no undo once it leaves the trash root).
 	mux.HandleFunc("GET /fs/trash", fsTrashListHandler())
-	mux.HandleFunc("POST /fs/trash/restore", fsTrashRestoreHandler())
+	mux.HandleFunc("POST /fs/trash/restore", invalidatesSizes(fsTrashRestoreHandler()))
 	mux.HandleFunc("DELETE /fs/trash/{id}", fsTrashPermanentDeleteHandler())
 	// Permission ops — admin-only.
-	mux.HandleFunc("POST /fs/chmod", fsChmodHandler())
-	mux.HandleFunc("POST /fs/chown", fsChownHandler())
+	mux.HandleFunc("POST /fs/chmod", invalidatesSizes(fsChmodHandler()))
+	mux.HandleFunc("POST /fs/chown", invalidatesSizes(fsChownHandler()))
 
 	// settings — local-only; each outpost owns its own Cloudflare creds, etc.
 	mux.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {

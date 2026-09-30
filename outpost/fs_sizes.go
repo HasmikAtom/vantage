@@ -1,9 +1,15 @@
 package main
 
 import (
+	"container/list"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -146,4 +152,228 @@ func walkDirSize(ctx context.Context, hostPath string, lim sizeLimits) (dirSizeR
 		}
 	}
 	return res, nil
+}
+
+// ---------------------------------------------------------------------------
+// Cache
+// ---------------------------------------------------------------------------
+
+// sizeCache is a small TTL + LRU map of completed walks keyed by host
+// path. Any successful fs mutation clears it entirely (invalidatesSizes);
+// mutations are rare next to browsing, so per-path invalidation is not
+// worth its complexity.
+type sizeCache struct {
+	mu  sync.Mutex
+	ttl time.Duration
+	max int
+	ll  *list.List
+	m   map[string]*list.Element
+	now func() time.Time
+}
+
+type sizeCacheEntry struct {
+	res dirSizeResult
+	at  time.Time
+}
+
+func newSizeCache(ttl time.Duration, max int) *sizeCache {
+	return &sizeCache{ttl: ttl, max: max, ll: list.New(), m: map[string]*list.Element{}, now: time.Now}
+}
+
+func (c *sizeCache) get(path string) (dirSizeResult, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.m[path]
+	if !ok {
+		return dirSizeResult{}, false
+	}
+	e := el.Value.(*sizeCacheEntry)
+	if c.now().Sub(e.at) > c.ttl {
+		c.ll.Remove(el)
+		delete(c.m, path)
+		return dirSizeResult{}, false
+	}
+	c.ll.MoveToFront(el)
+	return e.res, true
+}
+
+func (c *sizeCache) put(r dirSizeResult) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.m[r.Path]; ok {
+		el.Value = &sizeCacheEntry{res: r, at: c.now()}
+		c.ll.MoveToFront(el)
+		return
+	}
+	c.m[r.Path] = c.ll.PushFront(&sizeCacheEntry{res: r, at: c.now()})
+	for c.ll.Len() > c.max {
+		last := c.ll.Back()
+		c.ll.Remove(last)
+		delete(c.m, last.Value.(*sizeCacheEntry).res.Path)
+	}
+}
+
+func (c *sizeCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ll.Init()
+	c.m = map[string]*list.Element{}
+}
+
+func (c *sizeCache) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ll.Len()
+}
+
+var dirSizeCache = newSizeCache(5*time.Minute, 5000)
+
+// sizeWalkSem caps concurrent walks across every open stream so a few
+// browser tabs cannot saturate the host's disk.
+var sizeWalkSem = make(chan struct{}, 4)
+
+const sizeWalkersPerStream = 2
+
+// ---------------------------------------------------------------------------
+// GET /fs/sizes?path=<dir>  (SSE)
+// ---------------------------------------------------------------------------
+
+// fsSizesHandler streams one event per immediate subdirectory of path,
+// cached results first, then `event: done`. Denylisted and failing
+// children are omitted. The walk stops when the client disconnects.
+func fsSizesHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(auditActionHeader, "fs.sizes")
+		in, err := queryPath(r)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		w.Header().Set(auditTargetHeader, in)
+		entries, _, err := safeListDir(in, r.Header.Get(roleHeader))
+		if err != nil {
+			fsWriteErr(w, err)
+			return
+		}
+
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Time{})
+		h := w.Header()
+		h.Set("Content-Type", "text/event-stream")
+		h.Set("Cache-Control", "no-cache")
+		h.Set("Connection", "keep-alive")
+		h.Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+
+		emit := func(res dirSizeResult) {
+			b, _ := json.Marshal(res)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+			_ = rc.Flush()
+		}
+
+		var todo []string
+		for _, e := range entries {
+			if e.Type != "dir" || pathInDenylist(e.Path) {
+				continue
+			}
+			if res, ok := dirSizeCache.get(e.Path); ok {
+				emit(res)
+				continue
+			}
+			todo = append(todo, e.Path)
+		}
+
+		ctx := r.Context()
+		jobs := make(chan string)
+		results := make(chan dirSizeResult)
+		var wg sync.WaitGroup
+		for i := 0; i < sizeWalkersPerStream; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for p := range jobs {
+					select {
+					case sizeWalkSem <- struct{}{}:
+					case <-ctx.Done():
+						continue
+					}
+					res, err := walkDirSize(ctx, p, defaultSizeLimits)
+					<-sizeWalkSem
+					if err != nil {
+						continue
+					}
+					dirSizeCache.put(res)
+					select {
+					case results <- res:
+					case <-ctx.Done():
+					}
+				}
+			}()
+		}
+		go func() {
+			defer close(jobs)
+			for _, p := range todo {
+				select {
+				case jobs <- p:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		keepalive := time.NewTicker(25 * time.Second)
+		defer keepalive.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case res, ok := <-results:
+				if !ok {
+					if ctx.Err() != nil {
+						return
+					}
+					_, _ = io.WriteString(w, "event: done\ndata: {}\n\n")
+					_ = rc.Flush()
+					return
+				}
+				emit(res)
+			case <-keepalive.C:
+				_, _ = io.WriteString(w, ": keepalive\n\n")
+				_ = rc.Flush()
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Invalidation
+// ---------------------------------------------------------------------------
+
+// statusCapture records the status code a handler wrote.
+type statusCapture struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusCapture) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusCapture) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
+// invalidatesSizes wraps a mutating fs handler: when it succeeds the
+// folder-size cache is dropped so the next stream re-walks.
+func invalidatesSizes(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sc := &statusCapture{ResponseWriter: w, status: http.StatusOK}
+		h(sc, r)
+		if sc.status < 400 {
+			dirSizeCache.clear()
+		}
+	}
 }

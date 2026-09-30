@@ -551,8 +551,10 @@ viewerApi.all('/servers/:id/*', async (c) => {
   // Long-lived SSE endpoints:
   //   /stream                          — dashboard snapshot push
   //   /containers/<id>/logs/stream    — per-container log tail
+  //   /fs/sizes                        — folder-size fill-in for the Files tab
   const isStream =
     tail === '/stream' ||
+    tail === '/fs/sizes' ||
     /^\/containers\/[^/]+\/logs\/stream$/.test(tail);
   const isLongRunningWrite =
     (method === 'POST' && tail === '/containers') ||
