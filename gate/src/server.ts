@@ -7,11 +7,13 @@ import { env } from './env.js';
 import {
   addServer,
   ensureRegistrySchema,
+  getServer,
   getServerToken,
   listServers,
   removeServer,
   updateServer,
 } from './registry.js';
+import { createPinStore, validatePins } from './pins.js';
 import {
   ensureAuditSchema,
   startAuditRetention,
@@ -44,6 +46,8 @@ await migrations.runMigrations();
 ensureRegistrySchema();
 ensureAuditSchema();
 ensureWhitelistSchema();
+const pinStore = createPinStore(db);
+pinStore.ensureSchema();
 startAuditRetention();
 
 // One-time backfill: existing users predate the role column. The bootstrap
@@ -375,9 +379,36 @@ viewerApi.put('/servers/:id', async (c) => {
 
 viewerApi.delete('/servers/:id', (c) => {
   const user = c.get('user');
-  const ok = removeServer(user.id, c.req.param('id'));
+  const id = c.req.param('id');
+  // Removing a server also drops the user's pinned folders for it; there
+  // are no foreign keys in this DB, so do it in the same transaction.
+  const ok = db.transaction(() => {
+    const removed = removeServer(user.id, id);
+    if (removed) pinStore.deleteForServer(user.id, id);
+    return removed;
+  })();
   if (!ok) return c.json({ error: 'unknown server' }, 404);
   return c.json({ ok: true });
+});
+
+// Pinned folders for the Files tab sidebar — /api/pins/:serverId.
+// Deliberately NOT under /servers/:id/…: that prefix is the outpost proxy
+// catch-all below.
+viewerApi.get('/pins/:serverId', (c) => {
+  const user = c.get('user');
+  const serverId = c.req.param('serverId');
+  if (!getServer(user.id, serverId)) return c.json({ error: 'unknown server' }, 404);
+  return c.json(pinStore.list(user.id, serverId));
+});
+
+viewerApi.put('/pins/:serverId', async (c) => {
+  const user = c.get('user');
+  const serverId = c.req.param('serverId');
+  if (!getServer(user.id, serverId)) return c.json({ error: 'unknown server' }, 404);
+  const body = await c.req.json().catch(() => null);
+  const v = validatePins(body);
+  if (!v.ok) return c.json({ error: v.error }, 400);
+  return c.json(pinStore.replace(user.id, serverId, v.pins));
 });
 
 // ---------------------------------------------------------------------------

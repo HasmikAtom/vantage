@@ -134,6 +134,19 @@ server {
         proxy_read_timeout 30s;
     }
 
+    # ----- pinned folders (Files tab sidebar) → gate service -----------------
+    location /api/pins/ {
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Cookie            $http_cookie;
+        proxy_read_timeout 30s;
+    }
+
     # ----- cross-outpost transfer orchestrator → gate service ---------------
     # POST /api/transfer (create), DELETE /api/transfer/:id (cancel) route
     # to the gate service; SSE progress at /api/transfer/:id/stream has
