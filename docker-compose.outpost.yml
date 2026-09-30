@@ -1,8 +1,8 @@
 name: vantage-outpost
 
-# Backend-only deploy for a secondary box that the dashboard's auth-service
+# Outpost-only deploy for a secondary box that the prime's gate-service
 # proxy registers and calls through `/api/servers/<id>/...`. No auth, no
-# frontend, no nginx — the only gate is the shared VANTAGE_BACKEND_TOKEN
+# prime, no nginx — the only gate is the shared VANTAGE_OUTPOST_TOKEN
 # header.
 #
 # Port exposure defaults to 0.0.0.0 because the dashboard host has to be
@@ -13,19 +13,19 @@ name: vantage-outpost
 #   NIC, override VANTAGE_OUTPOST_BIND to the LAN / VPN / Tailscale IP so
 #   the container doesn't accept connections from outside that interface:
 #
-#     VANTAGE_BACKEND_TOKEN=... VANTAGE_OUTPOST_BIND=100.64.0.5 \
+#     VANTAGE_OUTPOST_TOKEN=... VANTAGE_OUTPOST_BIND=100.64.0.5 \
 #       docker compose -f docker-compose.outpost.yml up -d --build
 #
 #   On a private LAN with no public NIC, the default is fine.
 
 services:
-  backend:
+  outpost:
     build:
       context: ./outpost
       dockerfile: Dockerfile
       args:
         VANTAGE_VERSION: ${VANTAGE_VERSION:-dev}
-    image: vantage-backend:${VANTAGE_VERSION:-dev}
+    image: vantage-outpost:${VANTAGE_VERSION:-dev}
     container_name: vantage-outpost
     restart: unless-stopped
     cap_add:
@@ -46,9 +46,9 @@ services:
       DOCKER_SOCK: /var/run/docker.sock
       VANTAGE_DATA_DIR: /data
       VANTAGE_ENCRYPTION_KEY: ${VANTAGE_ENCRYPTION_KEY:-}
-      VANTAGE_BACKEND_TOKEN: ${VANTAGE_BACKEND_TOKEN:?VANTAGE_BACKEND_TOKEN must be set on the outpost — see docker-compose.outpost.yml}
+      VANTAGE_OUTPOST_TOKEN: ${VANTAGE_OUTPOST_TOKEN:?VANTAGE_OUTPOST_TOKEN must be set on the outpost — see docker-compose.outpost.yml}
       # Per-host Cloudflare creds can also be configured later via the
-      # primary's Settings page, which proxies through to this backend.
+      # primary's Settings page, which proxies through to this outpost.
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_TUNNEL_ID: ${CLOUDFLARE_TUNNEL_ID:-}
@@ -77,8 +77,8 @@ services:
       - /dev:/dev
       - vantage-outpost-data:/data
     ports:
-      # Default: all interfaces on host port 8095. The dashboard's
-      # auth-service proxy needs to reach this from another host on the
+      # Default: all interfaces on host port 8095. The prime's
+      # gate-service proxy needs to reach this from another host on the
       # network; binding to 127.0.0.1 would defeat the entire outpost role.
       # Override VANTAGE_OUTPOST_BIND to pin to a specific NIC (Tailscale,
       # VPN, LAN bridge) — strongly recommended on any box with a public IP.

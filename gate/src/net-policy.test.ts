@@ -22,7 +22,7 @@ import {
 
 // Make sure the env switch isn't carried in from the parent shell — these
 // tests assume the safe default.
-delete process.env.AUTH_SSRF_ALLOW_PRIVATE;
+delete process.env.GATE_SSRF_ALLOW_PRIVATE;
 
 // ---------------------------------------------------------------------------
 // isBlockedIP
@@ -92,13 +92,13 @@ test('isBlockedIP: garbage IPs fail closed', () => {
 });
 
 test('isBlockedIP: env opt-out returns false for everything', () => {
-  process.env.AUTH_SSRF_ALLOW_PRIVATE = '1';
+  process.env.GATE_SSRF_ALLOW_PRIVATE = '1';
   try {
     assert.equal(isBlockedIP('127.0.0.1'), false);
     assert.equal(isBlockedIP('169.254.169.254'), false);
     assert.equal(isBlockedIP('::1'), false);
   } finally {
-    delete process.env.AUTH_SSRF_ALLOW_PRIVATE;
+    delete process.env.GATE_SSRF_ALLOW_PRIVATE;
   }
 });
 

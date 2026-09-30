@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Vantage Dashboard API",
-    "description": "HTTP API exposed by a single Vantage backend (`vantage-api`). Every endpoint sits under `/api/` and is gated by the `X-Vantage-Backend-Token` shared secret. In the standard prod deployment the dashboard's auth-service proxy injects this header on behalf of authenticated browser sessions; if you're calling the backend directly (curl, scripts), supply the header yourself.\n\nMost endpoints serve slices of a single in-memory snapshot refreshed by the collectors loop every ~2s; `GET /api/dashboard` returns the whole snapshot and supports conditional GETs via `ETag` / `If-None-Match`.\n\nMulti-host orchestration — the per-user server registry and `/api/servers*` proxying — lives in the dashboard's auth service, not here. Each `vantage-api` instance is independent and monitors exactly one host.",
+    "description": "HTTP API exposed by a single `vantage-outpost` instance. Every endpoint sits under `/api/` and is gated by the `X-Vantage-Outpost-Token` shared secret. In the standard prod deployment the dashboard's gate-service proxy injects this header on behalf of authenticated browser sessions; if you're calling the outpost directly (curl, scripts), supply the header yourself.\n\nMost endpoints serve slices of a single in-memory snapshot refreshed by the collectors loop every ~2s; `GET /api/dashboard` returns the whole snapshot and supports conditional GETs via `ETag` / `If-None-Match`.\n\nMulti-host orchestration — the per-user server registry and `/api/servers*` proxying — lives in the dashboard's gate service, not here. Each `vantage-outpost` instance is independent and monitors exactly one host.",
     "version": "1.0.0"
   },
   "servers": [
@@ -12,10 +12,10 @@
     { "name": "health", "description": "Liveness / collector status" },
     { "name": "snapshot", "description": "The full dashboard snapshot" },
     { "name": "resources", "description": "Individual snapshot slices" },
-    { "name": "settings", "description": "Per-backend configuration (Cloudflare creds, etc.)" }
+    { "name": "settings", "description": "Per-outpost configuration (Cloudflare creds, etc.)" }
   ],
   "security": [
-    { "backendToken": [] }
+    { "outpostToken": [] }
   ],
   "paths": {
     "/api/health": {
@@ -206,7 +206,7 @@
     "/api/containers": {
       "get": {
         "tags": ["resources"],
-        "summary": "Docker containers visible to the backend",
+        "summary": "Docker containers visible to the outpost",
         "responses": {
           "200": {
             "description": "OK",
@@ -357,11 +357,11 @@
   },
   "components": {
     "securitySchemes": {
-      "backendToken": {
+      "outpostToken": {
         "type": "apiKey",
         "in": "header",
-        "name": "X-Vantage-Backend-Token",
-        "description": "Shared secret required on every request; the backend refuses to start without `VANTAGE_BACKEND_TOKEN` set. In the standard dashboard deployment the auth service injects this header server-side when proxying browser sessions to a registered backend, so end-users don't supply it themselves; CLI / direct callers must."
+        "name": "X-Vantage-Outpost-Token",
+        "description": "Shared secret required on every request; the outpost refuses to start without `VANTAGE_OUTPOST_TOKEN` set. In the standard dashboard deployment the gate service injects this header server-side when proxying browser sessions to a registered outpost, so end-users don't supply it themselves; CLI / direct callers must."
       }
     },
     "responses": {
@@ -801,7 +801,7 @@
           "apiToken":    { "type": "string" },
           "accountId":   { "type": "string" },
           "tunnelId":    { "type": "string" },
-          "refreshSecs": { "type": "integer", "description": "Auto-refresh interval. Bounded by the backend's `MinCloudflareRefreshSecs` / `MaxCloudflareRefreshSecs`." }
+          "refreshSecs": { "type": "integer", "description": "Auto-refresh interval. Bounded by the outpost's `MinCloudflareRefreshSecs` / `MaxCloudflareRefreshSecs`." }
         },
         "required": ["apiToken", "accountId"]
       },

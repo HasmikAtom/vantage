@@ -260,8 +260,8 @@ func stripV6Suffix(s string) string {
 //	"Anywhere"        -> to="Anywhere"
 //	"10.0.0.0/8 80"   -> to="10.0.0.0/8" port=80 (rare with the long form)
 //
-// On formats we don't recognise we leave the spec in To verbatim — the
-// frontend still has Raw to show the user.
+// On formats we don't recognise we leave the spec in To verbatim —
+// vantage-prime still has Raw to show the user.
 func parseUfwSpec(spec string) (port, portEnd int, proto, to string) {
 	spec = stripV6Suffix(spec)
 	// Strip an "on <iface>" suffix; we don't surface it in the typed rule.

@@ -19,7 +19,7 @@ import (
 //
 //   - Each stack is one directory under `<VANTAGE_DATA_DIR>/stacks/<name>/`
 //     containing a single `docker-compose.yml`. Files live on the host that
-//     runs the containers, not in the central auth-service DB, because
+//     runs the containers, not in the central gate-service DB, because
 //     `docker compose` requires the file on local disk and the stack is a
 //     per-host artifact.
 //

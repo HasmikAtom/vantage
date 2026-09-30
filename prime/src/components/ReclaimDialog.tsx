@@ -314,7 +314,7 @@ function volumeToRow(v: ReclaimableVolume): Row {
   };
 }
 
-// Short human-readable age. Backend ships ISO-8601; we render "3d", "5h",
+// Short human-readable age. Outpost ships ISO-8601; we render "3d", "5h",
 // "12m", "just now" — enough granularity for "is this fresh or stale?"
 // without taking up a wide column.
 function ageOf(iso: string): string {

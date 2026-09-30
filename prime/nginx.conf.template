@@ -35,9 +35,9 @@ server {
     #   - img-src 'self' data:: inline SVG data URIs show up in a few
     #     places (tailwind backgrounds, react-style icons).
     #   - connect-src 'self': fetch/XHR/SSE all go to our origin via
-    #     nginx; the auth-service does any outbound work to outpost
-    #     backends server-side, so browsers never make cross-origin
-    #     requests in the documented topology.
+    #     nginx; the gate service does any outbound work to outposts
+    #     server-side, so browsers never make cross-origin requests in
+    #     the documented topology.
     #   - frame-ancestors 'none': nobody may iframe us — clickjacking
     #     defence for the control-plane.
     #   - base-uri 'none', object-src 'none', form-action 'self': closes
@@ -55,16 +55,16 @@ server {
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
 
     # Docker's embedded DNS — required for runtime upstream resolution below.
-    # We resolve `backend` at request time (via $backend_upstream) so nginx
-    # boots even when the control-plane-only compose omits the backend
+    # We resolve `outpost` at request time (via $outpost_upstream) so nginx
+    # boots even when the control-plane-only compose omits the outpost
     # service entirely; in that mode the swaggerui / openapi.json routes
     # simply return 502 if anyone hits them.
     resolver 127.0.0.11 valid=30s ipv6=off;
-    set $backend_upstream backend:8080;
+    set $outpost_upstream outpost:8080;
 
     # ----- public auth endpoints (login, sign-in, callbacks, etc.) -----
     location /auth/ {
-        proxy_pass         http://auth:3000;
+        proxy_pass         http://gate:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -74,27 +74,27 @@ server {
     }
 
     # ----- session check used by the gates below (nginx internal) -----
-    location = /__auth_check {
+    location = /__gate_check {
         internal;
-        proxy_pass             http://auth:3000/auth/_check;
+        proxy_pass             http://gate:3000/auth/_check;
         proxy_pass_request_body off;
         proxy_set_header       Content-Length "";
         proxy_set_header       X-Original-URI $request_uri;
         proxy_set_header       Cookie         $http_cookie;
     }
 
-    # ----- registry + per-server proxy → auth service ------------------------
-    # All /api/servers* traffic terminates at the auth service: it owns the
-    # user-scoped registry, attaches per-backend tokens server-side, and
-    # forwards to the chosen backend. The Go backend is no longer involved
+    # ----- registry + per-server proxy → gate service ------------------------
+    # All /api/servers* traffic terminates at the gate service: it owns the
+    # user-scoped registry, attaches per-outpost tokens server-side, and
+    # forwards to the chosen outpost. The Go outpost is no longer involved
     # in either role on the control plane host.
     #
     # The two locations cover both shapes the SPA uses:
     #   /api/servers        (GET list, POST add)
-    #   /api/servers/<id>/* (PUT/DELETE manage, ANY proxy to that backend)
+    #   /api/servers/<id>/* (PUT/DELETE manage, ANY proxy to that outpost)
     location = /api/servers {
-        auth_request     /__auth_check;
-        proxy_pass         http://auth:3000;
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -104,27 +104,27 @@ server {
         proxy_read_timeout 30s;
     }
     location /api/servers/ {
-        auth_request     /__auth_check;
-        proxy_pass         http://auth:3000;
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_set_header   Cookie            $http_cookie;
-        # Longer read timeout — this path covers the proxied backend calls,
+        # Longer read timeout — this path covers the proxied outpost calls,
         # some of which (e.g. /settings/cloudflare with a refresh) can take
         # several seconds to complete.
         proxy_read_timeout 60s;
     }
 
-    # ----- email whitelist (admin-managed) → auth service -------------------
+    # ----- email whitelist (admin-managed) → gate service -------------------
     # Admin uses this to pre-authorize emails for sign-up after bootstrap.
-    # All routes are session-gated by auth_request; the auth service itself
+    # All routes are session-gated by auth_request; the gate service itself
     # enforces admin role inside the handler.
     location /api/whitelist {
-        auth_request     /__auth_check;
-        proxy_pass         http://auth:3000;
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -134,13 +134,13 @@ server {
         proxy_read_timeout 30s;
     }
 
-    # ----- cross-outpost transfer orchestrator → auth service ---------------
+    # ----- cross-outpost transfer orchestrator → gate service ---------------
     # POST /api/transfer (create), DELETE /api/transfer/:id (cancel) route
-    # to the auth service; SSE progress at /api/transfer/:id/stream has
+    # to the gate service; SSE progress at /api/transfer/:id/stream has
     # its own unbuffered location below.
     location /api/transfer {
-        auth_request     /__auth_check;
-        proxy_pass         http://auth:3000;
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -152,8 +152,8 @@ server {
 
     # Transfer progress SSE — same unbuffered shape as the dashboard stream.
     location ~ ^/api/transfer/[^/]+/stream$ {
-        auth_request     /__auth_check;
-        proxy_pass         http://auth:3000;
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -179,12 +179,12 @@ server {
     #   - chunked_transfer_encoding off: SSE bodies are intrinsically chunked
     #     but using HTTP/1.1 chunked framing on top adds latency. Off forces
     #     each upstream write to flush straight through.
-    #   - proxy_read_timeout 1d: the backend sends a keepalive comment every
+    #   - proxy_read_timeout 1d: the outpost sends a keepalive comment every
     #     25s so 60s would suffice, but a day's headroom means we never
     #     accidentally close a healthy stream if the keepalive cadence drifts.
     location ~ ^/api/servers/[^/]+/stream$ {
-        auth_request     /__auth_check;
-        proxy_pass         http://auth:3000;
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -204,8 +204,8 @@ server {
     # the location patterns can't be combined without giving up nginx's
     # longest-prefix safety.
     location ~ ^/api/servers/[^/]+/containers/[^/]+/logs/stream$ {
-        auth_request     /__auth_check;
-        proxy_pass         http://auth:3000;
+        auth_request     /__gate_check;
+        proxy_pass         http://gate:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -221,32 +221,32 @@ server {
     }
 
     # ----- API self-documentation (single-host deploys only) -----------------
-    # Swagger UI + OpenAPI spec are served by a backend running alongside the
+    # Swagger UI + OpenAPI spec are served by an outpost running alongside the
     # control plane in docker-compose.prod.yml. In control-plane-only deploys
-    # (docker-compose.prime.yml) there's no such backend; these
+    # (docker-compose.prime.yml) there's no such outpost; these
     # locations return 502 in that case. The runtime resolver above lets
     # nginx boot regardless.
     location /swaggerui {
-        auth_request     /__auth_check;
-        proxy_pass         http://$backend_upstream;
+        auth_request     /__gate_check;
+        proxy_pass         http://$outpost_upstream;
         proxy_http_version 1.1;
         proxy_set_header   Host                  $host;
         proxy_set_header   X-Real-IP             $remote_addr;
         proxy_set_header   X-Forwarded-For       $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto     $scheme;
-        proxy_set_header   X-Vantage-Backend-Token  "${VANTAGE_BACKEND_TOKEN}";
+        proxy_set_header   X-Vantage-Outpost-Token  "${VANTAGE_OUTPOST_TOKEN}";
         proxy_read_timeout 30s;
     }
 
     location = /openapi.json {
-        auth_request     /__auth_check;
-        proxy_pass         http://$backend_upstream;
+        auth_request     /__gate_check;
+        proxy_pass         http://$outpost_upstream;
         proxy_http_version 1.1;
         proxy_set_header   Host                  $host;
         proxy_set_header   X-Real-IP             $remote_addr;
         proxy_set_header   X-Forwarded-For       $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto     $scheme;
-        proxy_set_header   X-Vantage-Backend-Token  "${VANTAGE_BACKEND_TOKEN}";
+        proxy_set_header   X-Vantage-Outpost-Token  "${VANTAGE_OUTPOST_TOKEN}";
         proxy_read_timeout 30s;
     }
 

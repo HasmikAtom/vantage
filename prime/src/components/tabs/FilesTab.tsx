@@ -46,7 +46,7 @@ import {
 // FilesTab — Phase 1 single-pane file manager.
 //
 // Path semantics: every path the user sees and types is HOST-relative
-// (e.g. /home/hasmik, /etc/hosts). The backend translates through /hostfs
+// (e.g. /home/hasmik, /etc/hosts). The outpost translates through /hostfs
 // internally. Navigation state lives in URL hash so a refresh keeps you
 // where you were.
 //
@@ -1156,7 +1156,7 @@ function TransferRow({ transfer, onUpdate, onDismiss, onRefreshSource }: Transfe
       }
     };
     es.onerror = () => {
-      // The auth service closes the stream once the transfer ends, which
+      // The gate service closes the stream once the transfer ends, which
       // fires onerror in EventSource. Close cleanly; the last data event
       // already carries the terminal status.
       es.close();

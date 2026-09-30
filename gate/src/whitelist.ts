@@ -15,7 +15,7 @@
  *   deliberate: the same email remains valid for future password resets
  *   or re-registration if the user account is ever deleted.
  *
- *   Frontend never sees this table directly. The login form just learns
+ *   vantage-prime never sees this table directly. The login form just learns
  *   "this email status is 'new'" (whitelisted but unregistered) via
  *   /auth/_email_status and switches into "create a password" mode —
  *   from the user's POV there's no separate sign-up flow.

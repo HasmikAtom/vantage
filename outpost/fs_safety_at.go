@@ -673,7 +673,7 @@ func chownWalk(rel string, uid, gid int) error {
 //     in the same directory.
 //   - On overwrite, preserves the existing file's permission bits AND
 //     uid/gid so the in-place editor doesn't silently turn root:root
-//     files into the backend's identity.
+//     files into the outpost's identity.
 //   - On create, defaults to 0o644 and inherits ownership from the
 //     destination's parent directory (matching the upload rule).
 //
@@ -813,9 +813,9 @@ func safeWriteFile(in, role string, data []byte, perm os.FileMode) (string, erro
 //     (the handler maps to 409 Conflict).
 //   - On create, the temp gets the destination parent's uid/gid before
 //     rename, so a freshly-uploaded file inherits the directory's owner
-//     instead of running as backend:backend.
+//     instead of running as outpost:outpost.
 //   - On overwrite, the temp inherits the existing file's perm bits +
-//     uid/gid (not the backend's identity), preserving the inode's
+//     uid/gid (not the outpost's identity), preserving the inode's
 //     metadata across the replace.
 func safeUpload(in, role string, r io.Reader, overwrite bool) (int64, string, error) {
 	rel, hp, err := resolveSafeName(in, FsOpUpload, role)

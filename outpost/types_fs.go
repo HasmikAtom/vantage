@@ -1,8 +1,8 @@
 package main
 
 // FsEntry is one item in a directory listing or a stat response. Paths are
-// host-relative — the /hostfs prefix the backend uses internally is stripped
-// before serializing, so the frontend works in the host's own namespace.
+// host-relative — the /hostfs prefix the outpost uses internally is stripped
+// before serializing, so vantage-prime works in the host's own namespace.
 type FsEntry struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"`            // canonical, absolute (host-relative)

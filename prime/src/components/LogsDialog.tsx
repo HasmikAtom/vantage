@@ -15,7 +15,7 @@ export interface LogsDialogProps {
   onClose: () => void;
 }
 
-// Per-line shape emitted by the backend's logs SSE handler.
+// Per-line shape emitted by the outpost's logs SSE handler.
 interface LogEvent {
   stream: 'stdout' | 'stderr' | '_error';
   line: string;
@@ -49,7 +49,7 @@ interface LogRow {
  *                          without being yanked back down.
  *
  * Reconnect resume is handled by the browser's EventSource (it sends
- * Last-Event-ID automatically; the backend uses the nano timestamp to
+ * Last-Event-ID automatically; the outpost uses the nano timestamp to
  * skip lines we already saw).
  */
 export const LogsDialog = ({ serverId, target, onClose }: LogsDialogProps) => {
@@ -125,7 +125,7 @@ export const LogsDialog = ({ serverId, target, onClose }: LogsDialogProps) => {
       }
     };
 
-    // EventSource named-event channels for backend error frames.
+    // EventSource named-event channels for outpost error frames.
     es.addEventListener('error', () => {
       if (cancelled) return;
       if (es.readyState === EventSource.CLOSED) {

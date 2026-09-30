@@ -70,7 +70,7 @@ app.get(`${env.basePath}/_check`, async (c) => {
   return c.body(null, 204);
 });
 
-// Unauthenticated — the frontend hits this on cold load to decide between
+// Unauthenticated — vantage-prime hits this on cold load to decide between
 // the "create your admin" page and the sign-in page.
 app.get(`${env.basePath}/_status`, (c) => {
   return c.json({ bootstrapped: isBootstrapped() });
@@ -105,7 +105,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 // All routes are session-gated. Tokens are never returned to the client;
 // the registry stores them encrypted and the proxy below attaches them
 // server-side when forwarding /api/servers/<id>/<resource> to the chosen
-// backend.
+// outpost.
 
 interface AuthedUser {
   id: string;
@@ -174,7 +174,7 @@ function requireAuth(minRole: MinRole): MiddlewareHandler<AppEnv> {
 // browser can still slip through. Requiring a non-standard header
 // (`X-Requested-With: XMLHttpRequest`) on every mutating request closes
 // that gap: any cross-origin attempt to set this header forces a CORS
-// preflight, which the auth service does not grant — so an attacker
+// preflight, which the gate service does not grant — so an attacker
 // page cannot forge state-changing requests with the user's session
 // cookie. The SPA's apiFetch helper sets this header on every request.
 //
@@ -198,17 +198,17 @@ function requireXRequestedWith(): MiddlewareHandler<AppEnv> {
   };
 }
 
-// Mirrors backend's probeOutpost: GET <url>/api/health with the shared
-// secret; expect 200 (or 4xx for auth) and surface a meaningful error.
+// Probes an outpost: GET <url>/api/health with the shared secret; expect
+// 200 (or 4xx for auth) and surface a meaningful error.
 //
 // The connect is pinned to `pinnedIp` so DNS rebinding can't slip a private
-// address past the registration-time guard: the auth service connects to
+// address past the registration-time guard: the gate service connects to
 // the IP we just validated, not to whatever the resolver returns at fetch
 // time. The Host header preserves vhost dispatch on the upstream. For
 // HTTPS, the URL still carries the original hostname so SNI + cert
 // validation work (we get pinning via the http(s).Agent lookup hook
 // rather than rewriting the URL to an IP literal).
-async function probeBackend(
+async function probeOutpost(
   url: string,
   token: string,
   pinnedIp: string,
@@ -221,7 +221,7 @@ async function probeBackend(
     try {
       resp = await fetchPinned(target, pinnedIp, {
         method: 'GET',
-        headers: { 'X-Vantage-Backend-Token': token },
+        headers: { 'X-Vantage-Outpost-Token': token },
         signal: ctrl.signal,
       });
     } finally {
@@ -231,10 +231,10 @@ async function probeBackend(
     return { ok: false, error: (err as Error).message || 'unreachable' };
   }
   if (resp.status === 401) {
-    return { ok: false, error: 'backend rejected token (check VANTAGE_BACKEND_TOKEN)' };
+    return { ok: false, error: 'outpost rejected token (check VANTAGE_OUTPOST_TOKEN)' };
   }
   if (!resp.ok) {
-    return { ok: false, error: `backend returned ${resp.status}` };
+    return { ok: false, error: `outpost returned ${resp.status}` };
   }
   return { ok: true };
 }
@@ -319,7 +319,7 @@ viewerApi.post('/servers', async (c) => {
   // SSRF guard: parse + resolve + check every resolved IP against the
   // blocked-range list. The validated IP is cached on the row so all
   // future proxy fetches connect to it directly, defeating DNS rebinding.
-  // Operators on trusted LANs can opt out with AUTH_SSRF_ALLOW_PRIVATE=1.
+  // Operators on trusted LANs can opt out with GATE_SSRF_ALLOW_PRIVATE=1.
   let validated: Awaited<ReturnType<typeof validateAndResolve>>;
   try {
     validated = await validateAndResolve(url);
@@ -327,7 +327,7 @@ viewerApi.post('/servers', async (c) => {
     return c.json({ error: (err as Error).message }, 400);
   }
 
-  const probe = await probeBackend(url, token, validated.ip);
+  const probe = await probeOutpost(url, token, validated.ip);
   if (!probe.ok) return c.json({ error: `probe failed: ${probe.error}` }, 502);
 
   const summary = addServer(user.id, { name, url, token, resolvedIp: validated.ip });
@@ -361,7 +361,7 @@ viewerApi.put('/servers/:id', async (c) => {
       return c.json({ error: (err as Error).message }, 400);
     }
     newResolvedIp = validated.ip;
-    const probe = await probeBackend(url, token, validated.ip);
+    const probe = await probeOutpost(url, token, validated.ip);
     if (!probe.ok) return c.json({ error: `probe failed: ${probe.error}` }, 502);
   }
 
@@ -382,8 +382,8 @@ viewerApi.delete('/servers/:id', (c) => {
 
 // ---------------------------------------------------------------------------
 // Cross-outpost file transfer orchestrator. The transfer worker lives in
-// the auth service because it's the only process that knows about every
-// registered server's URL+token; the backend can't reach other backends
+// the gate service because it's the only process that knows about every
+// registered server's URL+token; outposts can't reach other outposts
 // directly without us mediating.
 // ---------------------------------------------------------------------------
 
@@ -391,7 +391,7 @@ viewerApi.delete('/servers/:id', (c) => {
 // enough to enter), but createTransfer applies its own operator-or-above
 // gate inside the handler — the original `user.role === 'viewer'` check.
 // We deliberately leave that internal gate in place: it's a defence-in-
-// depth check that mirrors the bar the backend enforces on write paths,
+// depth check that mirrors the bar the outpost enforces on write paths,
 // and moving it here would change the layer at which the 403 is produced
 // without changing the observable response shape. Out of scope.
 viewerApi.post('/transfer', (c) => createTransfer(c, c.get('user')));
@@ -455,7 +455,7 @@ adminWhitelistApi.delete('/:email', (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Proxy — /api/servers/<id>/<rest…>  → forwards to the backend with token
+// Proxy — /api/servers/<id>/<rest…>  → forwards to the outpost with token
 // ---------------------------------------------------------------------------
 //
 // The registry CRUD routes above use exact paths (/api/servers and
@@ -495,7 +495,7 @@ viewerApi.all('/servers/:id/*', async (c) => {
     return c.json({ error: `server's pinned IP ${pinnedIp} is now in a blocked range` }, 502);
   }
 
-  // The tail is whatever follows /api/servers/<id>; the backend expects it
+  // The tail is whatever follows /api/servers/<id>; the outpost expects it
   // under its own /api/ prefix.
   const prefix = `/api/servers/${id}`;
   const fullPath = c.req.path;
@@ -505,12 +505,12 @@ viewerApi.all('/servers/:id/*', async (c) => {
 
   // Pass through headers we care about; rewrite Host so the upstream sees
   // its own host (some servers / reverse proxies care). Strip cookies so
-  // we don't leak the auth-service session to backends — they have their
+  // we don't leak the gate-service session to outposts — they have their
   // own auth boundary (the token we're about to add).
   //
   // X-Vantage-* headers are stripped from the inbound copy unconditionally:
   // the proxy is the trust boundary for those, and a client must never be
-  // able to claim its own role or impersonate the backend token by setting
+  // able to claim its own role or impersonate the outpost token by setting
   // these headers in its request.
   const headers = new Headers();
   c.req.raw.headers.forEach((v, k) => {
@@ -527,8 +527,8 @@ viewerApi.all('/servers/:id/*', async (c) => {
     }
     headers.set(k, v);
   });
-  headers.set('X-Vantage-Backend-Token', target.token);
-  // Propagate the caller's role so the backend can gate write endpoints.
+  headers.set('X-Vantage-Outpost-Token', target.token);
+  // Propagate the caller's role so the outpost can gate write endpoints.
   headers.set('X-Vantage-Role', user.role);
 
   const method = c.req.method;
@@ -545,7 +545,7 @@ viewerApi.all('/servers/:id/*', async (c) => {
   //   POST/PUT/DELETE /stacks…    → `docker compose up/down` against a
   //                                 multi-service stack can take 10+ min
   //
-  // Give those 12 minutes — a comfortable buffer over the backend's own
+  // Give those 12 minutes — a comfortable buffer over the outpost's own
   // 10-minute cap so the proxy isn't the bottleneck. Everything else
   // stays at 30s.
   // Long-lived SSE endpoints:
@@ -609,7 +609,7 @@ viewerApi.all('/servers/:id/*', async (c) => {
   } catch (err) {
     if (timer !== undefined) clearTimeout(timer);
     c.req.raw.signal.removeEventListener('abort', onClientAbort);
-    return c.json({ error: `backend unreachable: ${(err as Error).message}` }, 502);
+    return c.json({ error: `outpost unreachable: ${(err as Error).message}` }, 502);
   }
   // We deliberately requested redirect:'manual'. The proxy already
   // returned a 3xx Location to the SPA if upstream produced one; we never
@@ -619,9 +619,9 @@ viewerApi.all('/servers/:id/*', async (c) => {
   // the timer here. Stream requests have no timer, so this is a no-op for them.
   if (timer !== undefined) clearTimeout(timer);
 
-  // Audit: backends declare auditable actions via X-Vantage-Audit-Action /
+  // Audit: outposts declare auditable actions via X-Vantage-Audit-Action /
   // -Target response headers. The audit row is written here (not at the
-  // backend) because the audit DB lives in this service's SQLite, and the
+  // outpost) because the audit DB lives in this service's SQLite, and the
   // proxy is the only layer that knows who the authenticated user is.
   // Headers are stripped before the response is returned to the SPA.
   const auditAction = resp.headers.get('X-Vantage-Audit-Action');
@@ -640,7 +640,7 @@ viewerApi.all('/servers/:id/*', async (c) => {
         serverId: id,
         target: auditTarget,
         status,
-        // For non-streamed bodies the backend's writeErr produces a small
+        // For non-streamed bodies the outpost's writeErr produces a small
         // JSON {"error": "..."} which we deliberately don't peek into here
         // — peeking would consume the body and corrupt the response sent
         // to the SPA. The HTTP status is enough forensic signal; richer
@@ -656,9 +656,9 @@ viewerApi.all('/servers/:id/*', async (c) => {
   }
 
   // Pass status, headers, and body straight back. Strip hop-by-hop headers
-  // and any Set-Cookie (the backend should never be setting cookies on the
+  // and any Set-Cookie (the outpost should never be setting cookies on the
   // SPA's origin anyway). Also strip the audit declaration headers — they're
-  // a control-plane contract between backend and proxy, not for the SPA.
+  // a control-plane contract between outpost and proxy, not for the SPA.
   const outHeaders = new Headers();
   resp.headers.forEach((v, k) => {
     const lower = k.toLowerCase();

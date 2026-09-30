@@ -599,8 +599,8 @@ export interface FirewallRule {
 }
 
 export interface FirewallStatus {
-  available: boolean;    // false = no supported backend on this server
-  backend: string;       // 'ufw' etc.
+  available: boolean;    // false = no supported firewall backend on this server
+  backend: string;       // 'ufw' etc. (firewall backend)
   active: boolean;
   default?: string;
   rules: FirewallRule[];

@@ -9,7 +9,7 @@ interface Props {
 
 // CloudflareRefreshButton triggers an immediate Cloudflare API fetch for the
 // active server, bypassing the scheduled interval. The new tunnel data is
-// pushed to the dashboard via SSE as soon as the backend's snapshot bumps,
+// pushed to the dashboard via SSE as soon as the outpost's snapshot bumps,
 // so the button just shows a spinner while the round-trip completes.
 export function CloudflareRefreshButton({ serverId }: Props) {
   const [refreshing, setRefreshing] = React.useState(false);

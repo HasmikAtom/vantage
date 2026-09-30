@@ -1,7 +1,7 @@
 name: vantage-dev
 
 services:
-  auth:
+  gate:
     build:
       context: ./gate
       dockerfile: Dockerfile.dev
@@ -12,37 +12,37 @@ services:
     working_dir: /app
     environment:
       PORT: 3000
-      AUTH_DB_PATH: /data/auth.db
-      AUTH_BASE_PATH: /auth
+      GATE_DB_PATH: /data/auth.db
+      GATE_BASE_PATH: /auth
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
-      # AES-256-GCM key for encrypting backend tokens in the server registry.
+      # AES-256-GCM key for encrypting outpost tokens in the server registry.
       # Generate once with `openssl rand -base64 32` and persist.
       VANTAGE_REGISTRY_KEY: ${VANTAGE_REGISTRY_KEY:?VANTAGE_REGISTRY_KEY must be set (openssl rand -base64 32)}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_DEV_FRONTEND_PORT:-5173}}
-      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:${VANTAGE_DEV_FRONTEND_PORT:-5173},http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_DEV_FRONTEND_PORT:-5173},http://${VANTAGE_LAN_IP:-127.0.0.1}:${VANTAGE_DEV_FRONTEND_PORT:-5173},http://localhost:${VANTAGE_PROD_PORT:-8088}}
-      AUTH_RP_ID:     ${AUTH_RP_ID:-${VANTAGE_HOSTNAME:-localhost}}
-      AUTH_RP_NAME:   ${AUTH_RP_NAME:-Vantage (dev)}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_DEV_PRIME_PORT:-5173}}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:${VANTAGE_DEV_PRIME_PORT:-5173},http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_DEV_PRIME_PORT:-5173},http://${VANTAGE_LAN_IP:-127.0.0.1}:${VANTAGE_DEV_PRIME_PORT:-5173},http://localhost:${VANTAGE_PROD_PORT:-8088}}
+      GATE_RP_ID:     ${GATE_RP_ID:-${VANTAGE_HOSTNAME:-localhost}}
+      GATE_RP_NAME:   ${GATE_RP_NAME:-Vantage (dev)}
       GITHUB_CLIENT_ID:     ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GOOGLE_CLIENT_ID:     ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     volumes:
-      - ./auth:/app
-      - vantage-dev-auth-modules:/app/node_modules
-      - vantage-dev-auth-data:/data
+      - ./gate:/app
+      - vantage-dev-gate-modules:/app/node_modules
+      - vantage-dev-gate-data:/data
     ports:
-      - "${VANTAGE_DEV_AUTH_PORT:-3000}:3000"
+      - "${VANTAGE_DEV_GATE_PORT:-3000}:3000"
     networks:
       - vantage-dev
 
-  backend:
+  outpost:
     build:
       context: ./outpost
       dockerfile: Dockerfile.dev
       args:
         VANTAGE_VERSION: ${VANTAGE_VERSION:-dev}
-    image: vantage-backend:dev
-    container_name: vantage-backend-dev
+    image: vantage-outpost:dev
+    container_name: vantage-outpost-dev
     working_dir: /app
     cap_add:
       - SYS_RAWIO
@@ -66,8 +66,8 @@ services:
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_TUNNEL_ID: ${CLOUDFLARE_TUNNEL_ID:-}
     volumes:
-      - ./backend:/app
-      - vantage-dev-backend-data:/data
+      - ./outpost:/app
+      - vantage-dev-outpost-data:/data
       - vantage-dev-go-mod:/go/pkg/mod
       - vantage-dev-go-cache:/root/.cache/go-build
       - /proc:/host/proc:ro
@@ -84,11 +84,11 @@ services:
       - /:/hostfs:ro,rslave
       - /dev:/dev
     ports:
-      - "${VANTAGE_DEV_BACKEND_PORT:-8082}:8080"
+      - "${VANTAGE_DEV_OUTPOST_PORT:-8082}:8080"
     networks:
       - vantage-dev
 
-  frontend:
+  prime:
     build:
       context: ./prime
       dockerfile: Dockerfile.dev
@@ -97,17 +97,17 @@ services:
     image: vantage-prime:dev
     container_name: vantage-prime-dev
     environment:
-      BACKEND_URL: http://backend:8080
-      AUTH_URL:    http://auth:3000
+      OUTPOST_URL: http://outpost:8080
+      GATE_URL:    http://gate:3000
       CHOKIDAR_USEPOLLING: "true"
     volumes:
-      - ./frontend:/app
+      - ./prime:/app
       - /app/node_modules
     ports:
-      - "${VANTAGE_DEV_FRONTEND_PORT:-5173}:5173"
+      - "${VANTAGE_DEV_PRIME_PORT:-5173}:5173"
     depends_on:
-      - backend
-      - auth
+      - outpost
+      - gate
     networks:
       - vantage-dev
 
@@ -118,6 +118,6 @@ networks:
 volumes:
   vantage-dev-go-mod:
   vantage-dev-go-cache:
-  vantage-dev-auth-modules:
-  vantage-dev-auth-data:
-  vantage-dev-backend-data:
+  vantage-dev-gate-modules:
+  vantage-dev-gate-data:
+  vantage-dev-outpost-data:

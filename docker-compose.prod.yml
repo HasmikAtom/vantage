@@ -1,7 +1,7 @@
 name: vantage-prod
 
 services:
-  auth:
+  gate:
     build:
       context: ./gate
       dockerfile: Dockerfile
@@ -12,10 +12,10 @@ services:
     restart: unless-stopped
     environment:
       PORT: 3000
-      AUTH_DB_PATH: /data/auth.db
-      AUTH_BASE_PATH: /auth
+      GATE_DB_PATH: /data/auth.db
+      GATE_BASE_PATH: /auth
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
-      # AES-256-GCM key for encrypting backend tokens in the server registry.
+      # AES-256-GCM key for encrypting outpost tokens in the server registry.
       # Generate once with `openssl rand -base64 32` and persist; rotating
       # invalidates every stored token.
       VANTAGE_REGISTRY_KEY: ${VANTAGE_REGISTRY_KEY:?VANTAGE_REGISTRY_KEY must be set (openssl rand -base64 32)}
@@ -24,22 +24,22 @@ services:
       # point at a public domain.
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_PROD_PORT:-8088}}
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:${VANTAGE_PROD_PORT:-8088},http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_PROD_PORT:-8088},http://${VANTAGE_LAN_IP:-127.0.0.1}:${VANTAGE_PROD_PORT:-8088}}
-      AUTH_RP_ID:   ${AUTH_RP_ID:-${VANTAGE_HOSTNAME:-localhost}}
-      AUTH_RP_NAME: ${AUTH_RP_NAME:-Vantage}
+      GATE_RP_ID:   ${GATE_RP_ID:-${VANTAGE_HOSTNAME:-localhost}}
+      GATE_RP_NAME: ${GATE_RP_NAME:-Vantage}
       GITHUB_CLIENT_ID:     ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GOOGLE_CLIENT_ID:     ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      # The auth-service refuses to proxy to private / Docker-network /
+      # The gate-service refuses to proxy to private / Docker-network /
       # link-local IPs by default (SSRF defence). In the single-host
-      # bundled topology the local `backend` resolves to a 10.0.0.0/8
+      # bundled topology the local `outpost` resolves to a 10.0.0.0/8
       # Docker IP, so this default deployment IS the trusted-LAN case
       # the env-var was designed for — default it on here. Override to
-      # "0" only if you want to proxy exclusively to backends on public
+      # "0" only if you want to proxy exclusively to outposts on public
       # IPs (uncommon for this product). prime / outpost deployments
-      # inherit the auth-service's own default (off) since each operator's
+      # inherit the gate-service's own default (off) since each operator's
       # outpost topology varies.
-      AUTH_SSRF_ALLOW_PRIVATE: ${AUTH_SSRF_ALLOW_PRIVATE:-1}
+      GATE_SSRF_ALLOW_PRIVATE: ${GATE_SSRF_ALLOW_PRIVATE:-1}
     volumes:
       - vantage-gate-data:/data
     expose:
@@ -47,13 +47,13 @@ services:
     networks:
       - vantage-prod
 
-  backend:
+  outpost:
     build:
       context: ./outpost
       dockerfile: Dockerfile
       args:
         VANTAGE_VERSION: ${VANTAGE_VERSION:-dev}
-    image: vantage-backend:${VANTAGE_VERSION:-dev}
+    image: vantage-outpost:${VANTAGE_VERSION:-dev}
     container_name: vantage-outpost
     restart: unless-stopped
     cap_add:
@@ -78,12 +78,12 @@ services:
       DOCKER_SOCK: /var/run/docker.sock
       VANTAGE_DATA_DIR: /data
       VANTAGE_ENCRYPTION_KEY: ${VANTAGE_ENCRYPTION_KEY:-}
-      # Shared secret enforced by the backend's requireToken middleware.
-      # The user supplies this when registering the backend in the
-      # dashboard's "Add server" form; the auth-service proxy attaches it
-      # to every API call it forwards. Leave unset to run the backend in
+      # Shared secret enforced by the outpost's requireToken middleware.
+      # The user supplies this when registering the outpost in the
+      # dashboard's "Add server" form; the gate-service proxy attaches it
+      # to every API call it forwards. Leave unset to run the outpost in
       # open mode (only useful for local iteration with `make dev`).
-      VANTAGE_BACKEND_TOKEN: ${VANTAGE_BACKEND_TOKEN:-}
+      VANTAGE_OUTPOST_TOKEN: ${VANTAGE_OUTPOST_TOKEN:-}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_TUNNEL_ID: ${CLOUDFLARE_TUNNEL_ID:-}
@@ -99,7 +99,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
       - /run/systemd:/run/systemd:ro
-      # `rw` is needed for the Stacks panel's edit-discovered flow — backend
+      # `rw` is needed for the Stacks panel's edit-discovered flow — outpost
       # writes compose files back to the project working_dir on the host.
       # The blast radius is already "operator can pwn the host via docker"
       # since docker.sock is mounted rw above (operator can spawn a
@@ -113,18 +113,18 @@ services:
       # the actual ioctls still gates on SYS_RAWIO/SYS_ADMIN above.
       - /dev:/dev
       - vantage-outpost-data:/data
-    # Publish to the host so the backend can be registered by URL like any
+    # Publish to the host so the outpost can be registered by URL like any
     # other server (http://<host-ip>:8095) — consistent with the outpost
-    # deployments. The auth-service proxy in this same compose still reaches
-    # it via Docker DNS at `backend:8080` regardless. Override
-    # VANTAGE_BACKEND_BIND to pin to a specific NIC if this host has a
+    # deployments. The gate-service proxy in this same compose still reaches
+    # it via Docker DNS at `outpost:8080` regardless. Override
+    # VANTAGE_OUTPOST_BIND to pin to a specific NIC if this host has a
     # public IP; the shared-secret token is the only access gate.
     ports:
-      - "${VANTAGE_BACKEND_BIND:-0.0.0.0}:${VANTAGE_BACKEND_PORT:-8095}:8080"
+      - "${VANTAGE_OUTPOST_BIND:-0.0.0.0}:${VANTAGE_OUTPOST_PORT:-8095}:8080"
     networks:
       - vantage-prod
 
-  frontend:
+  prime:
     build:
       context: ./prime
       dockerfile: Dockerfile
@@ -135,13 +135,13 @@ services:
     restart: unless-stopped
     environment:
       # Rendered into nginx.conf via the base image's templates feature
-      # (see frontend/Dockerfile). Must match the backend's value.
-      VANTAGE_BACKEND_TOKEN: ${VANTAGE_BACKEND_TOKEN:-}
+      # (see prime/Dockerfile). Must match the outpost's value.
+      VANTAGE_OUTPOST_TOKEN: ${VANTAGE_OUTPOST_TOKEN:-}
     ports:
       - "${VANTAGE_PROD_PORT:-8088}:80"
     depends_on:
-      - backend
-      - auth
+      - outpost
+      - gate
     networks:
       - vantage-prod
 

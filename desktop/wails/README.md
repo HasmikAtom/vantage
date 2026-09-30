@@ -2,11 +2,11 @@
 
 Native window around the Vantage dashboard, built with [Wails 2](https://wails.io).
 Iteration-1 scaffold: opens a window that redirects to `http://localhost:8088`
-(override with `VANTAGE_URL`). No SPA bundled, no backend embedded yet.
+(override with `VANTAGE_URL`). No SPA bundled, no outpost embedded yet.
 
 ## Prerequisites
 
-- **Go ≥ 1.22** — already a project requirement (the backend uses it too).
+- **Go ≥ 1.22** — already a project requirement (the outpost uses it too).
 - **Wails CLI**:
   ```
   go install github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -75,20 +75,24 @@ VANTAGE_URL=http://homelab.lan:8088 wails dev
         └── index.html     # tiny shell that redirects to TargetURL()
 ```
 
+(The `frontend/` directory here is a wails-framework convention for the
+embedded webview assets, not vantage-prime; the React SPA lives in
+`../../prime/`.)
+
 ## Iteration 2 plan
 
-1. Build the React SPA from `../../frontend` straight into `frontend/dist/`
+1. Build the React SPA from `../../prime` straight into `frontend/dist/`
    (replace `wails.json`'s `frontend:install` / `frontend:build` no-ops with
-   `npm --prefix ../../frontend ci` and `... run build -- --outDir <here>`).
-2. **Import the Go backend as a package** (`github.com/.../backend`), call
+   `npm --prefix ../../prime ci` and `... run build -- --outDir <here>`).
+2. **Import the Go outpost as a package** (`github.com/.../outpost`), call
    its `ListenAndServe()` from a goroutine in `main.go`. The SPA fetches
    `/api/*` from the same in-process server — no IPC, no sidecar.
-3. Move passkey / session-auth into the Go binary too (port the Node `auth/`
+3. Move passkey / session-auth into the Go binary too (port the Node `gate/`
    service to Go), so the whole stack collapses to one process.
 
 ## Iteration-1 limitations
 
 - No SPA bundled — the webview just loads a remote URL.
-- The Go backend in the project root is **not** embedded; this build
-  still depends on the dockerized stack (or any reachable Vantage backend).
+- The Go outpost in the project root is **not** embedded; this build
+  still depends on the dockerized stack (or any reachable vantage-outpost).
 - No icons committed — see `build/README.md`. Defaults are used until then.

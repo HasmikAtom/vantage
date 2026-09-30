@@ -182,7 +182,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
 
   const [tunnel, setTunnel] = React.useState<Tunnel | null>(null);
   const [view, setView] = React.useState<'dashboard' | 'settings'>('dashboard');
-  // The registry lives on the auth service per user; empty until they add
+  // The registry lives on the gate service per user; empty until they add
   // their first server. We track loaded state separately so we don't flash
   // the first-run page before the initial fetch lands.
   const [servers, setServers] = React.useState<ServerSummary[]>([]);
@@ -229,7 +229,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
     void refreshServers();
   }, [refreshServers]);
 
-  // Dashboard data flows through Server-Sent Events: the backend pushes a
+  // Dashboard data flows through Server-Sent Events: the outpost pushes a
   // fresh snapshot only when its internal version actually advances, so an
   // idle dashboard sends ~zero traffic instead of polling every 2s. Empty
   // url leaves the connection unopened (FirstServerSetup branch handles

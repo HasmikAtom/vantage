@@ -1,8 +1,8 @@
 /**
  * SSRF guard for outbound HTTP requests against operator-supplied URLs.
  *
- * The auth service lets users register Vantage backend URLs and proxies
- * requests against them with a shared backend token attached. Without a
+ * The gate service lets users register vantage-outpost URLs and proxies
+ * requests against them with a shared outpost token attached. Without a
  * guard, a low-privileged user could register `http://169.254.169.254/...`
  * (cloud metadata) or `http://127.0.0.1:8080` (sibling container) and turn
  * the service into an internal-network probe + credential exfiltrator.
@@ -16,7 +16,7 @@
  *     a TTL-0 record can't return a public IP on our check and a private
  *     IP at fetch time because we connect by IP.
  *
- * Escape hatch: AUTH_SSRF_ALLOW_PRIVATE=1 disables the private-range
+ * Escape hatch: GATE_SSRF_ALLOW_PRIVATE=1 disables the private-range
  * checks for trusted-LAN deployments. Default off.
  *
  * No third-party CIDR libs — the matcher is rolled in this file.
@@ -37,7 +37,7 @@ import type { LookupFunction } from 'node:net';
  * one Map lookup per call.
  */
 function allowPrivate(): boolean {
-  return process.env.AUTH_SSRF_ALLOW_PRIVATE === '1';
+  return process.env.GATE_SSRF_ALLOW_PRIVATE === '1';
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +348,7 @@ export async function validateAndResolve(url: string): Promise<ValidatedTarget> 
     }
   }
   // Prefer the first v4 — Node's fetch + IP literal works cleanly for v4
-  // and most LAN/backend deployments are v4 today. Fall back to the first
+  // and most LAN/outpost deployments are v4 today. Fall back to the first
   // v6 if no v4 came back.
   const v4 = ips.find((ip) => isIPv4(ip));
   const picked = v4 ?? ips[0];
@@ -385,7 +385,7 @@ export function agentForPinnedIP(family: 4 | 6, ip: string, scheme: 'http:' | 'h
  * the Host header preserved. For http this is fully transparent. For
  * https this means the TLS cert validates against the IP, which usually
  * fails for operator-owned LANs. The proxy callers should generally
- * stick to http for in-LAN backends; the caveat is documented at the
+ * stick to http for in-LAN outposts; the caveat is documented at the
  * call site.
  */
 export async function safeFetch(url: string, init?: RequestInit): Promise<Response> {

@@ -38,11 +38,11 @@ interface EnvRow {
  * later sub-phase per the roadmap.
  *
  * Image pull happens synchronously inside the create call — UI shows a
- * "Pulling… (this can take a minute)" pending state. The auth proxy gives
+ * "Pulling… (this can take a minute)" pending state. The gate proxy gives
  * this endpoint a 6-minute upstream timeout to cover cold pulls.
  *
  * On success the dialog closes; the new container shows up in the table
- * via the SSE stream within ~1s of the backend's fast-poke.
+ * via the SSE stream within ~1s of the outpost's fast-poke.
  */
 export const CreateContainerDialog = ({
   serverId,

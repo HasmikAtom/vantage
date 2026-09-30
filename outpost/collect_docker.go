@@ -626,7 +626,7 @@ func (c *dockerClient) inspectContainer(ctx context.Context, id string) (*Contai
 
 	// Project raw → typed view. Names start with '/' in Docker's response;
 	// strip it so the UI gets a bare name. Default nil slices/maps to empty
-	// so the JSON output is "[]" / "{}" rather than null (the frontend
+	// so the JSON output is "[]" / "{}" rather than null (vantage-prime
 	// doesn't expect nullable arrays — same convention used in NewManager).
 	mounts := make([]ContainerMount, 0, len(raw.Mounts))
 	for _, m := range raw.Mounts {
@@ -1040,7 +1040,7 @@ func (c *dockerClient) listReclaimableContainers(ctx context.Context) ([]Reclaim
 }
 
 // listReclaimableVolumes returns volumes with refCount == 0. Includes
-// CreatedAt from docker (older daemons may report empty string — frontend
+// CreatedAt from docker (older daemons may report empty string — vantage-prime
 // renders "—" in that case).
 func (c *dockerClient) listReclaimableVolumes(ctx context.Context) ([]ReclaimableVolume, error) {
 	df, err := c.systemDF(ctx)

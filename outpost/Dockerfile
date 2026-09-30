@@ -6,7 +6,7 @@ COPY go.mod ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/vantage-api ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/vantage-outpost ./
 
 # ---- runtime stage ----
 # Needs smartctl (SMART), systemctl + dbus (services), tzdata (timestamps),
@@ -37,7 +37,7 @@ RUN apt-get update \
  && apt-get purge -y --auto-remove curl gnupg \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /out/vantage-api /usr/local/bin/vantage-api
+COPY --from=builder /out/vantage-outpost /usr/local/bin/vantage-outpost
 
 # Monorepo version baked in at build time so /version can report it without
 # needing the VERSION file at runtime. docker-compose passes this from the
@@ -46,5 +46,5 @@ ARG VANTAGE_VERSION=dev
 ENV VANTAGE_VERSION=$VANTAGE_VERSION
 
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/vantage-api"]
+ENTRYPOINT ["/usr/local/bin/vantage-outpost"]
 CMD ["-addr=:8080"]

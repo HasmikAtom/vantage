@@ -22,7 +22,7 @@ export interface RemoveContainerDialogProps {
  * Destructive confirmation for removing a container.
  *
  * Single dialog with two opt-in checkboxes (force, remove anonymous
- * volumes) rather than a multi-step wizard. Backend returns 409 when the
+ * volumes) rather than a multi-step wizard. Outpost returns 409 when the
  * container is running and force is off — we catch that and surface an
  * inline error suggesting the user enable force, instead of closing the
  * dialog and forcing them to start over.

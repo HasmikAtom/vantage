@@ -75,7 +75,7 @@ export function SettingsPage({
   const [removingId, setRemovingId] = React.useState<string | null>(null);
 
   // Refetch settings whenever the active server changes — Cloudflare creds
-  // live with each backend, so the panel always reflects the current target.
+  // live with each outpost, so the panel always reflects the current target.
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -119,7 +119,7 @@ export function SettingsPage({
       });
       setView(res.view);
       // Re-display in the chunkiest unit the saved value fits, in case the
-      // backend clamped or normalised what we sent.
+      // outpost clamped or normalised what we sent.
       const u = pickUnit(res.view.cloudflareRefreshSecs);
       setRefreshUnit(u);
       setRefreshValue(String(res.view.cloudflareRefreshSecs / UNIT_TO_SECS[u]));
@@ -223,9 +223,9 @@ export function SettingsPage({
             <div>
               <h2 className="font-serif text-lg font-semibold tracking-tight">Servers</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Add another Vantage backend to monitor it from this dashboard. You'll need its base URL
-                and the <span className="font-mono">VANTAGE_BACKEND_TOKEN</span> it was started with —
-                stored encrypted on the auth service.
+                Add another vantage-outpost to monitor it from this dashboard. You'll need its base URL
+                and the <span className="font-mono">VANTAGE_OUTPOST_TOKEN</span> it was started with —
+                stored encrypted on the gate service.
               </p>
             </div>
           </div>
@@ -298,7 +298,7 @@ export function SettingsPage({
               <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
                 URL
                 <span className="ml-2 normal-case tracking-normal text-muted-foreground/70">
-                  the backend's base URL — e.g. <span className="font-mono">http://100.64.0.5:8080</span>
+                  the outpost's base URL — e.g. <span className="font-mono">http://100.64.0.5:8080</span>
                 </span>
               </div>
               <Input
@@ -311,13 +311,13 @@ export function SettingsPage({
               <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
                 Token
                 <span className="ml-2 normal-case tracking-normal text-muted-foreground/70">
-                  the backend's <span className="font-mono">VANTAGE_BACKEND_TOKEN</span> — stored encrypted, never sent back to the browser
+                  the outpost's <span className="font-mono">VANTAGE_OUTPOST_TOKEN</span> — stored encrypted, never sent back to the browser
                 </span>
               </div>
               <Input
                 type="password"
                 autoComplete="off"
-                placeholder="shared secret from the backend's env"
+                placeholder="shared secret from the outpost's env"
                 value={newToken}
                 onChange={(e) => setNewToken(e.target.value)}
               />
@@ -345,7 +345,7 @@ export function SettingsPage({
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Credentials for <span className="font-mono">{activeName}</span>. Encrypted at
-                rest on that backend and never sent back to the browser.
+                rest on that outpost and never sent back to the browser.
               </p>
             </div>
             {loading ? (
@@ -742,7 +742,7 @@ function AboutPanel({ servers }: { servers: ServerSummary[] }) {
 
       <ul className="divide-y rounded-md border">
         <VersionRow label="prime" sublabel="this dashboard" value={PRIME_VERSION} />
-        <VersionRow label="gate" sublabel="auth service" value={gate} />
+        <VersionRow label="gate" sublabel="auth + proxy" value={gate} />
         {servers.map((s) => (
           <VersionRow
             key={s.id}

@@ -273,8 +273,8 @@ func fsRenameHandler() http.HandlerFunc {
 //
 //	{from, to, overwrite?: bool, recursive?: bool}
 //
-// `to` is the FULL destination path (the same contract as fsRename — the
-// frontend joins parent + new name). overwrite=false (the default)
+// `to` is the FULL destination path (the same contract as fsRename —
+// vantage-prime joins parent + new name). overwrite=false (the default)
 // refuses an existing destination; recursive=true is required when
 // copying a directory. Operator role gates the write.
 func fsCopyHandler() http.HandlerFunc {
@@ -360,7 +360,7 @@ func fsDeleteHandler() http.HandlerFunc {
 			return
 		}
 		w.Header().Set(auditTargetHeader, in)
-		deletedBy := r.Header.Get("X-Vantage-User") // optional; auth proxy may pass through
+		deletedBy := r.Header.Get("X-Vantage-User") // optional; gate proxy may pass through
 		trashID, _, err := fsDeleteToTrashSafe(in, r.Header.Get(roleHeader), deletedBy)
 		if err != nil {
 			fsWriteErr(w, err)
@@ -428,7 +428,7 @@ func fsUploadHandler() http.HandlerFunc {
 // fsReceiveHandler is the server-to-server destination endpoint used by
 // the cross-outpost transfer relay. Unlike fsUploadHandler it expects the
 // REQUEST BODY to BE the file content (no multipart wrapper), which makes
-// the relaying path in the auth service a straight stream-to-stream pipe
+// the relaying path in the gate service a straight stream-to-stream pipe
 // with no buffering or boundary parsing.
 //
 // `?path=` is the full destination path (parent dir must exist).

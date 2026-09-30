@@ -17,8 +17,8 @@ function optional(name: string, fallback = ''): string {
 
 export const env = {
   port: parseInt(optional('PORT', '3000'), 10),
-  databasePath: optional('AUTH_DB_PATH', './data/auth.db'),
-  basePath: optional('AUTH_BASE_PATH', '/auth'),
+  databasePath: optional('GATE_DB_PATH', './data/auth.db'),
+  basePath: optional('GATE_BASE_PATH', '/auth'),
 
   // 'production' / 'development' / 'test'. Drives whether session cookies
   // are flagged Secure: dev over http://localhost would otherwise drop them.
@@ -28,7 +28,7 @@ export const env = {
   secret: required('BETTER_AUTH_SECRET'),
   baseURL: optional('BETTER_AUTH_URL'),
 
-  // AES-256-GCM key for encrypting per-server backend tokens stored in the
+  // AES-256-GCM key for encrypting per-server outpost tokens stored in the
   // registry. Must be a 32-byte secret, base64-encoded. Generate with:
   //   openssl rand -base64 32
   // Rotation invalidates every stored token; admins must re-enter each
@@ -41,8 +41,8 @@ export const env = {
     .filter(Boolean),
 
   // Passkey relying party — must match the origin host the user sees.
-  rpID: optional('AUTH_RP_ID', 'localhost'),
-  rpName: optional('AUTH_RP_NAME', 'Vantage'),
+  rpID: optional('GATE_RP_ID', 'localhost'),
+  rpName: optional('GATE_RP_NAME', 'Vantage'),
 
   github: {
     clientId: optional('GITHUB_CLIENT_ID'),
@@ -54,7 +54,7 @@ export const env = {
   },
 };
 
-// Loud startup warning when AUTH_RP_ID is left at its 'localhost' default
+// Loud startup warning when GATE_RP_ID is left at its 'localhost' default
 // in a production deploy. Passkey REGISTRATION silently binds to whatever
 // rpID is active at enrollment time, so a wrong value here means every
 // passkey users register is bound to 'localhost' and unusable from any
@@ -67,9 +67,9 @@ if (env.isProduction && env.rpID === 'localhost') {
     [
       '',
       '************************************************************',
-      'WARNING: AUTH_RP_ID is "localhost" in production.',
+      'WARNING: GATE_RP_ID is "localhost" in production.',
       'Passkeys registered now will be bound to localhost and will',
-      'NOT work from your real dashboard hostname. Set AUTH_RP_ID',
+      'NOT work from your real dashboard hostname. Set GATE_RP_ID',
       'to the hostname users see in their browser BEFORE any user',
       'enrolls a passkey.',
       '************************************************************',

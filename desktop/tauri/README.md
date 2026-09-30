@@ -2,7 +2,7 @@
 
 Native window around the Vantage dashboard, built with [Tauri 2](https://v2.tauri.app/).
 Iteration-1 scaffold: opens a window pointing at `http://localhost:8088`. No
-SPA bundled, no backend embedded.
+SPA bundled, no outpost embedded.
 
 ## Prerequisites
 
@@ -64,9 +64,9 @@ src-tauri/
 
 ## Iteration 2 plan
 
-1. Bundle the React SPA as the `frontendDist` (build `../../frontend` first).
-2. Ship the Go backend as a **sidecar** binary in `src-tauri/binaries/`,
-   launched by Tauri at startup. Backend's `--addr` randomized to a free
+1. Bundle the React SPA as the `frontendDist` (build `../../prime` first).
+2. Ship the Go outpost as a **sidecar** binary in `src-tauri/binaries/`,
+   launched by Tauri at startup. Outpost's `--addr` randomized to a free
    localhost port; the SPA picks it up via a config endpoint.
 3. Drop the dependency on the dockerized stack — desktop builds become
    fully standalone.
@@ -74,6 +74,6 @@ src-tauri/
 ## Iteration-1 limitations
 
 - No auth flow (the embedded webview loads the dashboard URL "as a
-  browser tab"). Relies on the remote backend's own auth.
+  browser tab"). Relies on the remote outpost's own auth.
 - No icons committed — see `src-tauri/icons/README.md`. Without icons,
   `npm run dev` works; `npm run build` complains.

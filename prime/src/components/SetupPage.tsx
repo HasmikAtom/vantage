@@ -5,7 +5,7 @@ import { VantageLogo } from './ui/brand';
 import { cn } from '@/lib/utils';
 
 /**
- * Shown when the auth service reports no users exist yet. Whoever finishes
+ * Shown when the gate service reports no users exist yet. Whoever finishes
  * this form first becomes the single admin — any future sign-up attempts
  * get rejected server-side.
  */

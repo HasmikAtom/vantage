@@ -1,7 +1,7 @@
 import { createAuthClient } from 'better-auth/react';
 import { passkeyClient } from '@better-auth/passkey/client';
 
-// Same-origin: in dev, Vite proxies /auth to the auth service. In prod,
+// Same-origin: in dev, Vite proxies /auth to the gate service. In prod,
 // nginx routes /auth to it. Either way, the SPA just talks to itself.
 export const authClient = createAuthClient({
   baseURL: window.location.origin,
@@ -24,7 +24,7 @@ const ROLE_RANK: Record<UserRole, number> = {
   admin: 3,
 };
 
-// Fails closed on any unknown/missing value — the backend does the same.
+// Fails closed on any unknown/missing value — the outpost does the same.
 function validRole(v: unknown): UserRole {
   return v === 'admin' || v === 'operator' || v === 'viewer' ? v : 'viewer';
 }
@@ -47,7 +47,7 @@ export function useCurrentRole(): UserRole {
  *   const canControl = useCan('operator');
  *   <Button disabled={!canControl}>Stop</Button>
  *
- * Backend enforcement remains the source of truth — this is for UX only.
+ * Outpost enforcement remains the source of truth — this is for UX only.
  */
 export function useCan(min: UserRole): boolean {
   const role = useCurrentRole();

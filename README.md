@@ -14,10 +14,10 @@ friends with one consistent view across every box you run.
 - **Storage**: filesystem usage and SMART summaries for each physical disk.
 - **Containers & services**: Docker container list with resource usage, plus
   the systemd unit overview.
-- **Multi-host**: register any number of remote `vantage-api` backends by
-  URL + shared-secret token. The auth service stores the registry per user
+- **Multi-host**: register any number of remote `vantage-outpost` instances by
+  URL + shared-secret token. The gate service stores the registry per user
   (tokens encrypted at rest) and proxies API calls server-side, so the
-  browser never holds backend tokens or sees cross-origin traffic.
+  browser never holds outpost tokens or sees cross-origin traffic.
 - **Single-admin bootstrap, whitelist-gated thereafter**: the first
   sign-up becomes admin; subsequent accounts require the admin to
   pre-authorize the email through the whitelist UI (gear icon →
@@ -29,17 +29,17 @@ friends with one consistent view across every box you run.
 ## Requirements
 
 - **Docker + Docker Compose** for the standard deploy.
-- **Linux kernel ≥ 5.6** on every host that runs `vantage-api`. The
-  backend uses `openat2(RESOLVE_BENEATH)` to keep file-manager operations
+- **Linux kernel ≥ 5.6** on every host that runs `vantage-outpost`. The
+  outpost uses `openat2(RESOLVE_BENEATH)` to keep file-manager operations
   contained inside the bind-mounted host root; older kernels do not
-  support this syscall and the backend will refuse to start. Linux 5.6
+  support this syscall and the outpost will refuse to start. Linux 5.6
   was released in 2020, so any current LTS distro (Ubuntu 20.04+,
   Debian 11+, RHEL 9+) works out of the box.
 
 ## Setup
 
 Vantage has two components — **prime** (the dashboard SPA + the `gate` auth
-service that fronts it) and **outposts** (the `vantage-api` monitoring agent
+service that fronts it) and **outposts** (the `vantage-outpost` monitoring agent
 that runs on each box you want to watch). Pick the shape that fits your
 topology, then follow the matching section.
 
@@ -70,7 +70,7 @@ commented):
 | ------------------------ | ------------------- | -------------------------- |
 | `BETTER_AUTH_SECRET`     | prime, prod         | `openssl rand -base64 32`  |
 | `VANTAGE_REGISTRY_KEY`   | prime, prod         | `openssl rand -base64 32`  |
-| `VANTAGE_BACKEND_TOKEN`  | outpost, prod       | `openssl rand -hex 32`     |
+| `VANTAGE_OUTPOST_TOKEN`  | outpost, prod       | `openssl rand -hex 32`     |
 | `VANTAGE_ENCRYPTION_KEY` | outpost (recommended)| `openssl rand -base64 32`  |
 
 A monitored box and a dashboard box need different subsets — see each
@@ -99,17 +99,17 @@ Open `http://localhost:8088` (or `http://<host>:${VANTAGE_PROD_PORT}`):
    below).
 
 Two containers come up: `vantage-gate` (auth service) and `vantage-prime`
-(nginx + SPA). No backend, no monitoring of the prime host itself.
+(nginx + SPA). No outpost, no monitoring of the prime host itself.
 
 ### 3. Outpost — monitored host only
 
 Use this when the box exists to be monitored *from* a prime running
-somewhere else. No UI, no auth, no database — just the `vantage-api`
+somewhere else. No UI, no auth, no database — just the `vantage-outpost`
 daemon answering metric requests gated by a shared token.
 
-Required in `.env`: `VANTAGE_BACKEND_TOKEN`.
+Required in `.env`: `VANTAGE_OUTPOST_TOKEN`.
 Recommended: `VANTAGE_ENCRYPTION_KEY` (encrypts Cloudflare credentials
-stored locally; without it the backend falls back to a hostname-derived
+stored locally; without it the outpost falls back to a hostname-derived
 key and logs a warning at startup).
 
 ```sh
@@ -139,29 +139,29 @@ the same box.
 **Same host — single-machine bundle:**
 
 Required in `.env`: `BETTER_AUTH_SECRET`, `VANTAGE_REGISTRY_KEY`,
-`VANTAGE_BACKEND_TOKEN`. Recommended: `VANTAGE_ENCRYPTION_KEY`.
+`VANTAGE_OUTPOST_TOKEN`. Recommended: `VANTAGE_ENCRYPTION_KEY`.
 
 ```sh
 make prod
 ```
 
-Three containers come up: `auth` (gate), `backend` (`vantage-api`
-monitoring this host), `frontend` (prime SPA). After login, register the
+Three containers come up: `gate` (auth service), `outpost` (`vantage-outpost`
+monitoring this host), `prime` (dashboard SPA). After login, register the
 local outpost:
 
 - Name: `local`
-- URL: `http://backend:8080` (Docker DNS — gate and backend share the prod
+- URL: `http://outpost:8080` (Docker DNS — gate and outpost share the prod
   network)
-- Token: your `VANTAGE_BACKEND_TOKEN`
+- Token: your `VANTAGE_OUTPOST_TOKEN`
 
-The same backend is also reachable from off-host at `http://<host-ip>:8095`
+The same outpost is also reachable from off-host at `http://<host-ip>:8095`
 if you want to add it to a *different* prime later.
 
 **Separate hosts — the standard multi-host setup:**
 
 On the **dashboard host**, follow §2 (Prime). On **each monitored host**,
 follow §3 (Outpost) — each outpost has its own `.env` with its own
-`VANTAGE_BACKEND_TOKEN`. Tokens don't have to match across outposts; you
+`VANTAGE_OUTPOST_TOKEN`. Tokens don't have to match across outposts; you
 supply the right one when you register each in the SPA.
 
 Then in the dashboard at `http://<prime-host>:8088`:
@@ -170,13 +170,13 @@ Then in the dashboard at `http://<prime-host>:8088`:
 2. Fill in:
    - **Name**: anything (`prod-db`, `nas`, `homelab-1`, …).
    - **URL**: `http://<outpost-host-or-vpn-ip>:8095`.
-   - **Token**: that outpost's `VANTAGE_BACKEND_TOKEN`.
+   - **Token**: that outpost's `VANTAGE_OUTPOST_TOKEN`.
 3. Save. Gate probes `GET <url>/api/health` with the token before
    persisting, so bad URLs or token mismatches surface immediately as
    `probe failed: …`.
 
 Repeat for each outpost. The header's server switcher lists every
-registered backend; each one carries its own Cloudflare tunnel
+registered outpost; each one carries its own Cloudflare tunnel
 credentials, scoped to that box.
 
 ## Cloudflare tunnels (optional)
@@ -197,7 +197,7 @@ will show each tunnel's public hostnames and connector status.
    seconds.
 
 The panel is scoped to the active server in the header switcher — each
-backend stores its own credentials encrypted at rest under
+outpost stores its own credentials encrypted at rest under
 `VANTAGE_ENCRYPTION_KEY`. The token is never returned to the browser; the
 UI only shows whether one is on file.
 
@@ -214,15 +214,15 @@ Essentials:
 | Variable                  | Purpose                                                |
 | ------------------------- | ------------------------------------------------------ |
 | `BETTER_AUTH_SECRET`      | Signs session cookies. Required.                       |
-| `VANTAGE_REGISTRY_KEY`    | AES-256-GCM key for encrypting per-server backend tokens in the registry. Required. |
-| `VANTAGE_BACKEND_TOKEN`   | Shared secret each `vantage-api` instance requires. **The backend refuses to start without it.** Each backend can have its own; you supply it when registering the server in the SPA. |
-| `VANTAGE_ENCRYPTION_KEY`  | Encrypts Cloudflare credentials stored on each backend. Recommended in production — without it the backend falls back to a hostname-derived key and logs a warning at startup. |
-| `AUTH_RP_ID`              | WebAuthn relying-party ID for passkeys. Defaults to `localhost`; set to your public hostname in production or passkey registrations get bound to localhost and silently break. |
-| `AUTH_SSRF_ALLOW_PRIVATE` | Set to `1` to let the auth service register backends at private addresses (`127.0.0.1`, RFC1918 ranges, `169.254.0.0/16`, etc.). Off by default — the service otherwise refuses to proxy to those ranges to prevent SSRF. Enable on trusted-LAN deployments where outpost backends are on the same private network as the auth service. |
+| `VANTAGE_REGISTRY_KEY`    | AES-256-GCM key for encrypting per-server outpost tokens in the registry. Required. |
+| `VANTAGE_OUTPOST_TOKEN`   | Shared secret each `vantage-outpost` instance requires. **The outpost refuses to start without it.** Each outpost can have its own; you supply it when registering the server in the SPA. |
+| `VANTAGE_ENCRYPTION_KEY`  | Encrypts Cloudflare credentials stored on each outpost. Recommended in production — without it the outpost falls back to a hostname-derived key and logs a warning at startup. |
+| `GATE_RP_ID`              | WebAuthn relying-party ID for passkeys. Defaults to `localhost`; set to your public hostname in production or passkey registrations get bound to localhost and silently break. |
+| `GATE_SSRF_ALLOW_PRIVATE` | Set to `1` to let the gate service register outposts at private addresses (`127.0.0.1`, RFC1918 ranges, `169.254.0.0/16`, etc.). Off by default — the service otherwise refuses to proxy to those ranges to prevent SSRF. Enable on trusted-LAN deployments where outposts are on the same private network as the gate service. |
 | `VANTAGE_PROD_PORT`       | Host port for the dashboard. Default `8088`.           |
 | `GITHUB_CLIENT_ID/SECRET`, `GOOGLE_CLIENT_ID/SECRET` | OAuth, optional.            |
 
-Secrets never get committed: `.env` is gitignored, the backend encrypts
+Secrets never get committed: `.env` is gitignored, the outpost encrypts
 anything saved through the Settings page at rest, and no credentials are
 ever returned to the browser (the API returns `tokenSet: true/false`, not
 the values themselves).
@@ -231,11 +231,11 @@ the values themselves).
 
 A few quirks worth knowing when running this in production:
 
-- **Browsers go through the auth proxy, never the backend directly.** The
-  backend no longer emits CORS headers — anything other than the
-  auth-service-proxied path will be blocked by the browser. CLI tools
-  (curl, scripts) hitting the backend directly are unaffected.
-- **CLI / script clients hitting the auth service** must send
+- **Browsers go through the gate proxy, never the outpost directly.** The
+  outpost no longer emits CORS headers — anything other than the
+  gate-service-proxied path will be blocked by the browser. CLI tools
+  (curl, scripts) hitting the outpost directly are unaffected.
+- **CLI / script clients hitting the gate service** must send
   `X-Requested-With: XMLHttpRequest` on mutating calls (POST/PUT/PATCH/DELETE)
   to `/api/*`. This is the dashboard's CSRF defence on top of
   SameSite=lax cookies; the SPA does it automatically, third-party
@@ -272,7 +272,7 @@ build it was made from.
   gate, and each registered outpost side-by-side so version drift is
   obvious.
 - **Image tags** — `vantage-prime:1.0.0`, `vantage-gate:1.0.0`,
-  `vantage-backend:1.0.0`. Dev images keep the `:dev` tag for slot
+  `vantage-outpost:1.0.0`. Dev images keep the `:dev` tag for slot
   separation.
 
 ### Wire compatibility
@@ -303,20 +303,20 @@ called out explicitly in `CHANGELOG.md`.
 
 ## Tech stack
 
-- **Frontend**: React + Vite + TypeScript, Tailwind, served by nginx.
-- **Backend**: Go (standard library only). Reads `/proc`, `/sys`, the Docker
+- **Prime** (dashboard SPA): React + Vite + TypeScript, Tailwind, served by nginx.
+- **Outpost** (monitoring agent): Go (standard library only). Reads `/proc`, `/sys`, the Docker
   socket, and DBus.
-- **Auth**: Node + Hono + Better Auth on SQLite.
+- **Gate** (auth + proxy): Node + Hono + Better Auth on SQLite.
 
 ## Without Docker
 
 ```sh
-cd outpost && go run .          # vantage-api (the monitoring agent)
-cd gate    && npm install && npm run dev   # auth + registry service
-cd prime   && npm install && npm run dev   # dashboard SPA
+cd outpost && go run .          # vantage-outpost (the monitoring agent)
+cd gate    && npm install && npm run dev   # vantage-gate (auth + registry)
+cd prime   && npm install && npm run dev   # vantage-prime (dashboard SPA)
 ```
 
-The backend (`outpost/`) discovers host CPU topology, memory, sensors, and
+The outpost (`outpost/`) discovers host CPU topology, memory, sensors, and
 disks by reading `/proc` and `/sys` at runtime — nothing is hardcoded. When
 run as a bare-metal binary the defaults are exactly `/proc` and `/sys`, so
 it Just Works on whichever machine you start it on (the same binary on a
@@ -327,7 +327,7 @@ filesystems read-only at `/host/proc` and `/host/sys` and set
 `HOST_PROC` / `HOST_SYS` env vars so the same code reads through to the
 host instead of the container's namespaced view. If you build your own
 image and roll your own runtime, replicate those two mounts + env vars or
-the backend will report the container's view (usually correct for CPU
+the outpost will report the container's view (usually correct for CPU
 counts, less so for sensors and disks).
 
 ## License

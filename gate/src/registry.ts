@@ -1,6 +1,6 @@
 /**
- * Per-user backend server registry, persisted in the same SQLite DB as
- * better-auth. Backend tokens are encrypted at rest with AES-256-GCM; the
+ * Per-user outpost server registry, persisted in the same SQLite DB as
+ * better-auth. Outpost tokens are encrypted at rest with AES-256-GCM; the
  * key is sourced from env.registryKey (VANTAGE_REGISTRY_KEY).
  *
  * Storage shape:

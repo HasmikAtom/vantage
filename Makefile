@@ -1,6 +1,6 @@
 # Vantage — dev/prod orchestration.
 #
-# Dev:  hot-reloading backend (air) + Vite HMR, sources bind-mounted.
+# Dev:  hot-reloading outpost (air) + Vite HMR, sources bind-mounted.
 # Prod: distroless Go binary + static Vite build served by nginx (proxies /api).
 
 DOCKER         ?= docker
@@ -16,8 +16,8 @@ COMPOSE_OUTPOST := $(DOCKER) compose -f docker-compose.outpost.yml
 VANTAGE_VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
 
 VANTAGE_PROD_PORT          ?= 8088
-VANTAGE_DEV_FRONTEND_PORT  ?= 5173
-VANTAGE_DEV_BACKEND_PORT   ?= 8082
+VANTAGE_DEV_PRIME_PORT     ?= 5173
+VANTAGE_DEV_OUTPOST_PORT   ?= 8082
 
 # Detect the box this runs on so trusted-origin / passkey-RP / canonical URL
 # defaults are sensible on a fresh deploy with zero .env config. Override any
@@ -25,7 +25,7 @@ VANTAGE_DEV_BACKEND_PORT   ?= 8082
 # to browsers (e.g. a public domain).
 VANTAGE_HOSTNAME           ?= $(shell hostname 2>/dev/null)
 VANTAGE_LAN_IP             ?= $(shell hostname -I 2>/dev/null | awk '{print $$1}')
-export VANTAGE_PROD_PORT VANTAGE_DEV_FRONTEND_PORT VANTAGE_DEV_BACKEND_PORT \
+export VANTAGE_PROD_PORT VANTAGE_DEV_PRIME_PORT VANTAGE_DEV_OUTPOST_PORT \
        VANTAGE_HOSTNAME VANTAGE_LAN_IP VANTAGE_VERSION
 
 .DEFAULT_GOAL := help
@@ -38,14 +38,14 @@ help:
 	@echo "Vantage — Make targets"
 	@echo
 	@echo "Dev (sources bind-mounted, hot reload):"
-	@echo "  make dev              build + run dev stack (foreground)"
-	@echo "  make dev-up           same, detached"
-	@echo "  make dev-down         stop dev stack"
-	@echo "  make dev-build        rebuild dev images"
-	@echo "  make dev-logs         follow dev logs"
-	@echo "  make dev-restart      restart dev containers"
-	@echo "  make dev-shell-be     shell into dev backend container"
-	@echo "  make dev-shell-fe     shell into dev frontend container"
+	@echo "  make dev                build + run dev stack (foreground)"
+	@echo "  make dev-up             same, detached"
+	@echo "  make dev-down           stop dev stack"
+	@echo "  make dev-build          rebuild dev images"
+	@echo "  make dev-logs           follow dev logs"
+	@echo "  make dev-restart        restart dev containers"
+	@echo "  make dev-shell-outpost  shell into dev outpost container"
+	@echo "  make dev-shell-prime    shell into dev prime container"
 	@echo
 	@echo "Prod (multi-stage, immutable images):"
 	@echo "  make prod             build + run prod stack (detached)"
@@ -55,7 +55,7 @@ help:
 	@echo "  make prod-restart     restart prod containers"
 	@echo "  make prod-ps          show prod containers"
 	@echo
-	@echo "Prime (auth + frontend only — backends register from elsewhere):"
+	@echo "Prime (gate + prime only — outposts register from elsewhere):"
 	@echo "  Prime bundles prime (dashboard SPA) + gate (auth service) on the same host."
 	@echo "  make prime          build + run prime stack (detached)"
 	@echo "  make prime-down     stop prime stack"
@@ -64,26 +64,26 @@ help:
 	@echo "  make prime-restart  restart prime containers"
 	@echo "  make prime-ps       show prime containers"
 	@echo
-	@echo "Outpost (backend-only deploy on a remote host, registered from the dashboard):"
-	@echo "  make outpost-up        build + run outpost (backend-only) (detached)"
+	@echo "Outpost (outpost-only deploy on a remote host, registered from the dashboard):"
+	@echo "  make outpost-up        build + run outpost (detached)"
 	@echo "  make outpost-down      stop outpost stack"
 	@echo "  make outpost-build     rebuild outpost image"
 	@echo "  make outpost-logs      follow outpost logs"
-	@echo "  Required env: VANTAGE_BACKEND_TOKEN (paste into the dashboard's Add Server form)"
+	@echo "  Required env: VANTAGE_OUTPOST_TOKEN (paste into the dashboard's Add Server form)"
 	@echo "  Optional env: VANTAGE_OUTPOST_BIND=100.64.0.5  VANTAGE_OUTPOST_PORT=8095"
 	@echo
 	@echo "Component-specific build:"
-	@echo "  make backend-dev-build / backend-prod-build"
-	@echo "  make frontend-dev-build / frontend-prod-build"
+	@echo "  make outpost-dev-build / outpost-prod-build"
+	@echo "  make prime-dev-build / prime-prod-build"
 	@echo
 	@echo "Housekeeping:"
 	@echo "  make ps               list dev + prod containers"
 	@echo "  make clean            stop both stacks, remove their images + volumes"
 	@echo
 	@echo "Vars (override on the make CLI or via .env):"
-	@echo "  VANTAGE_PROD_PORT=$(VANTAGE_PROD_PORT)           prod nginx -> host"
-	@echo "  VANTAGE_DEV_FRONTEND_PORT=$(VANTAGE_DEV_FRONTEND_PORT)   dev vite  -> host"
-	@echo "  VANTAGE_DEV_BACKEND_PORT=$(VANTAGE_DEV_BACKEND_PORT)    dev go    -> host"
+	@echo "  VANTAGE_PROD_PORT=$(VANTAGE_PROD_PORT)           prod nginx   -> host"
+	@echo "  VANTAGE_DEV_PRIME_PORT=$(VANTAGE_DEV_PRIME_PORT)      dev vite     -> host"
+	@echo "  VANTAGE_DEV_OUTPOST_PORT=$(VANTAGE_DEV_OUTPOST_PORT)    dev outpost  -> host"
 	@echo
 	@echo "Host auto-detected (used as defaults for trusted-origin / RP ID):"
 	@echo "  VANTAGE_HOSTNAME=$(VANTAGE_HOSTNAME)"
@@ -92,7 +92,7 @@ help:
 # ---------------------------------------------------------------------------
 # dev
 # ---------------------------------------------------------------------------
-.PHONY: dev dev-up dev-down dev-build dev-logs dev-restart dev-shell-be dev-shell-fe
+.PHONY: dev dev-up dev-down dev-build dev-logs dev-restart dev-shell-outpost dev-shell-prime
 dev:
 	$(COMPOSE_DEV) up --build
 
@@ -111,11 +111,11 @@ dev-logs:
 dev-restart:
 	$(COMPOSE_DEV) restart
 
-dev-shell-be:
-	$(COMPOSE_DEV) exec backend sh
+dev-shell-outpost:
+	$(COMPOSE_DEV) exec outpost sh
 
-dev-shell-fe:
-	$(COMPOSE_DEV) exec frontend sh
+dev-shell-prime:
+	$(COMPOSE_DEV) exec prime sh
 
 # ---------------------------------------------------------------------------
 # prod
@@ -126,7 +126,7 @@ prod: prod-up
 prod-up:
 	$(COMPOSE_PROD) up --build -d
 	@echo
-	@echo "Prod stack up. Frontend: http://localhost:$(VANTAGE_PROD_PORT)"
+	@echo "Prod stack up. Prime: http://localhost:$(VANTAGE_PROD_PORT)"
 
 prod-down:
 	$(COMPOSE_PROD) down
@@ -144,8 +144,8 @@ prod-ps:
 	$(COMPOSE_PROD) ps
 
 # ---------------------------------------------------------------------------
-# prime (prime SPA + gate auth, no backend — for multi-host deployments where
-# every backend lives on a different machine, registered from the dashboard)
+# prime (prime SPA + gate auth, no outpost — for multi-host deployments where
+# every outpost lives on a different machine, registered from the dashboard)
 # ---------------------------------------------------------------------------
 .PHONY: prime prime-up prime-down prime-build prime-logs prime-restart prime-ps
 prime: prime-up
@@ -153,7 +153,7 @@ prime: prime-up
 prime-up:
 	$(COMPOSE_PRIME) up --build -d
 	@echo
-	@echo "Prime up. Frontend: http://localhost:$(VANTAGE_PROD_PORT)"
+	@echo "Prime up. Dashboard: http://localhost:$(VANTAGE_PROD_PORT)"
 	@echo "Run \`make outpost-up\` on each box you want to monitor, then"
 	@echo "register it from the dashboard's Servers panel."
 
@@ -173,7 +173,7 @@ prime-ps:
 	$(COMPOSE_PRIME) ps
 
 # ---------------------------------------------------------------------------
-# outpost (backend-only — runs on a remote host, registered from the dashboard)
+# outpost (outpost-only — runs on a remote host, registered from the dashboard)
 # ---------------------------------------------------------------------------
 .PHONY: outpost-up outpost-down outpost-build outpost-logs outpost-restart outpost-ps
 outpost-up:
@@ -200,18 +200,18 @@ outpost-ps:
 # ---------------------------------------------------------------------------
 # per-service builds (useful for CI cache reuse)
 # ---------------------------------------------------------------------------
-.PHONY: backend-dev-build backend-prod-build frontend-dev-build frontend-prod-build
-backend-dev-build:
-	$(COMPOSE_DEV)  build backend
+.PHONY: outpost-dev-build outpost-prod-build prime-dev-build prime-prod-build
+outpost-dev-build:
+	$(COMPOSE_DEV)  build outpost
 
-backend-prod-build:
-	$(COMPOSE_PROD) build backend
+outpost-prod-build:
+	$(COMPOSE_PROD) build outpost
 
-frontend-dev-build:
-	$(COMPOSE_DEV)  build frontend
+prime-dev-build:
+	$(COMPOSE_DEV)  build prime
 
-frontend-prod-build:
-	$(COMPOSE_PROD) build frontend
+prime-prod-build:
+	$(COMPOSE_PROD) build prime
 
 # ---------------------------------------------------------------------------
 # misc

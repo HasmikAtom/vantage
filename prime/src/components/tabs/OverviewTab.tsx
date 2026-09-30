@@ -90,7 +90,7 @@ export const OverviewTab = ({ snapshot, tt, onTunnelClick, activeServerId, serve
   const diskIo = snapshot.diskIo ?? EMPTY_DISKIO;
   const netInterfaces = snapshot.network?.interfaces ?? EMPTY_NET_INTERFACES;
   const pressure = snapshot.pressure;
-  // Process state counts. The backend always populates a zeroed value, but
+  // Process state counts. The outpost always populates a zeroed value, but
   // older outpost binaries (pre-this-rollout) may not — coalesce so the
   // chip strip stays inert instead of throwing.
   const procStates = snapshot.processStates ?? { total: 0, running: 0, sleeping: 0, diskWait: 0, stopped: 0, zombie: 0, threads: 0 };

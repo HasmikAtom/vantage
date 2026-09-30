@@ -1,7 +1,7 @@
 package main
 
 type Container struct {
-	// ID is the full Docker container ID (64-char hex). The frontend truncates
+	// ID is the full Docker container ID (64-char hex). vantage-prime truncates
 	// for display; we keep the full value so command endpoints can address the
 	// container unambiguously even when names collide (rare but possible across
 	// docker contexts) or get renamed.
@@ -195,7 +195,7 @@ type StackUpdateRequest struct {
 
 // Reclaim — per-item list rows for the disk-usage cards' "Reclaim..." flow.
 // Each category has slightly different identifying fields, so they don't
-// share a base struct; the frontend renders per-category columns anyway.
+// share a base struct; vantage-prime renders per-category columns anyway.
 type ReclaimableImage struct {
 	ID        string `json:"id"`
 	RepoTag   string `json:"repoTag"` // "<none>" when dangling

@@ -26,7 +26,8 @@ node_modules/
 **/node_modules/
 prime/dist/
 gate/dist/
-outpost/vantage-api
+outpost/vantage-outpost
+outpost/backend
 outpost/outpost
 outpost/tmp/
 

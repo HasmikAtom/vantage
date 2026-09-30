@@ -133,7 +133,7 @@ func NewManager() *Manager {
 		slowSignal: make(chan struct{}, 1),
 		alerts:     newAlertEngine(),
 		// Initialise every slice to non-nil so Go's json.Marshal emits "[]"
-		// instead of "null". The frontend doesn't expect nullable arrays.
+		// instead of "null". vantage-prime doesn't expect nullable arrays.
 		snap: DashboardSnapshot{
 			Sensors:     []Sensor{},
 			Disks:       []Disk{},
@@ -474,7 +474,7 @@ func (m *Manager) RefreshTunnelsNow(ctx context.Context) error {
 // SMART (spawns smartctl) + system users/groups inventory (parses /etc/passwd
 // and /etc/group, both effectively static). Cloudflare tunnels live on their
 // own configurable loop in runTunnelLoop so the user can change the cadence
-// from the Settings page without restarting the backend.
+// from the Settings page without restarting the outpost.
 func (m *Manager) refreshSlow(ctx context.Context) {
 	disks, derr := collectDisks(ctx)
 	m.setErr("disks", derr)
@@ -554,7 +554,7 @@ func (m *Manager) NotifyTunnelSettingsChanged() {
 	}
 }
 
-// roundTo keeps numbers compact in JSON without surprising the frontend.
+// roundTo keeps numbers compact in JSON without surprising vantage-prime.
 func roundTo(v float64, places int) float64 {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0

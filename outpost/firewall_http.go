@@ -13,7 +13,7 @@ import (
 // firewallStatusHandler returns the current firewall snapshot
 // (backend name, active state, default policy, rule list). When no
 // supported backend was detected on this host we return a 200 with
-// available=false so the frontend can render a friendly placeholder
+// available=false so vantage-prime can render a friendly placeholder
 // instead of a generic error.
 //
 // Auth: viewer is sufficient — listing rules is read-only.

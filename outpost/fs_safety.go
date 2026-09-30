@@ -9,9 +9,9 @@ import (
 )
 
 // File-system feature paths live in the HOST's namespace from the user's
-// perspective. The backend container sees the host root through the
+// perspective. The outpost container sees the host root through the
 // /hostfs bind mount, so every user-supplied path P becomes ${hostRoot}/P
-// before we touch the filesystem. The frontend never sees the prefix.
+// before we touch the filesystem. vantage-prime never sees the prefix.
 //
 // hostRoot is resolved at startup so we don't repeatedly call os.Getenv on
 // every request. It is /hostfs in prod (matches docker-compose.prod.yml)
@@ -23,7 +23,7 @@ var hostRoot = func() string {
 	return "/hostfs"
 }()
 
-// Trash root lives at a fixed location ON THE HOST so it survives backend
+// Trash root lives at a fixed location ON THE HOST so it survives outpost
 // container rebuilds. We pin a single dir instead of per-filesystem trash
 // because the recovery UX is simpler — but it does mean cross-filesystem
 // deletes fall back to copy+delete (handled inside fsDeleteToTrash).
@@ -82,7 +82,7 @@ var fsAdminReadPaths = []string{
 var ErrPathDenied = errors.New("path is not accessible through the dashboard")
 
 // ErrPathOutsideHost is returned when a path resolves outside /hostfs (so a
-// crafted ".." can't escape into the backend container's own filesystem).
+// crafted ".." can't escape into the outpost container's own filesystem).
 var ErrPathOutsideHost = errors.New("path resolves outside the host filesystem")
 
 // ErrAdminRequired is returned when the role check fails for a sensitive
@@ -120,8 +120,8 @@ func containerPath(hostAbs string) string {
 	return hostRoot + hostAbs
 }
 
-// hostFromContainer strips the /hostfs prefix so paths returned to the
-// frontend look like absolute paths on the host, not paths inside our
+// hostFromContainer strips the /hostfs prefix so paths returned to
+// vantage-prime look like absolute paths on the host, not paths inside our
 // container.
 func hostFromContainer(containerAbs string) string {
 	if containerAbs == hostRoot {

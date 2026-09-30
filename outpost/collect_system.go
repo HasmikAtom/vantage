@@ -484,7 +484,7 @@ func readMachineID() string {
 // collectSystem() call and reused — hostname, OS pretty name, kernel uname,
 // machine-id, CPU model and logical-core count don't change at runtime.
 // A user who renames their host or upgrades their kernel needs to restart the
-// backend anyway; not worth re-reading these files every 2s.
+// outpost anyway; not worth re-reading these files every 2s.
 var (
 	staticSystemOnce sync.Once
 	staticHostname   string
@@ -505,7 +505,7 @@ func loadStaticSystem() {
 	staticCPUPhysicalCores = readCPUPhysicalCores()
 	// On weird hardware / containerised setups where /sys topology isn't
 	// available, fall back to the logical count so the UI doesn't render
-	// "0 cores". The frontend can still infer SMT is absent from
+	// "0 cores". vantage-prime can still infer SMT is absent from
 	// physical == logical.
 	if staticCPUPhysicalCores == 0 {
 		staticCPUPhysicalCores = staticCPUCores

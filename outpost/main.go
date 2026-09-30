@@ -20,11 +20,11 @@ import (
 )
 
 const (
-	tokenHeader = "X-Vantage-Backend-Token"
+	tokenHeader = "X-Vantage-Outpost-Token"
 	roleHeader  = "X-Vantage-Role"
 
 	// Audit declaration headers. Handlers set these BEFORE any branch (role
-	// deny, validation error, success). The auth proxy reads them out of the
+	// deny, validation error, success). The gate proxy reads them out of the
 	// upstream response and writes one audit row per declared action, then
 	// strips the headers before returning to the SPA — they're an internal
 	// control-plane contract, not user-facing data.
@@ -32,8 +32,8 @@ const (
 	auditTargetHeader = "X-Vantage-Audit-Target"
 )
 
-// Role precedence. Stays in lock-step with auth.ts::UserRole. The auth
-// service is the only caller that can reach us (proxy + backend token), so
+// Role precedence. Stays in lock-step with auth.ts::UserRole. The gate
+// service is the only caller that can reach us (proxy + outpost token), so
 // trusting this header is acceptable — but we fail closed on an unknown or
 // missing value rather than guessing.
 const (
@@ -55,7 +55,7 @@ func roleAtLeast(min, got string) bool {
 }
 
 // requireRole wraps a handler with a role check based on the proxy-supplied
-// X-Vantage-Role header. The auth service strips any client-supplied value
+// X-Vantage-Role header. The gate service strips any client-supplied value
 // before forwarding, so this header reflects the authenticated user's role.
 // Returns 403 with a small JSON body if the caller is below `min`.
 func requireRole(min string, next http.HandlerFunc) http.HandlerFunc {
@@ -71,7 +71,7 @@ func requireRole(min string, next http.HandlerFunc) http.HandlerFunc {
 
 var (
 	manager      = NewManager()
-	backendToken = os.Getenv("VANTAGE_BACKEND_TOKEN")
+	outpostToken = os.Getenv("VANTAGE_OUTPOST_TOKEN")
 )
 
 func errString(err error) string {
@@ -108,13 +108,13 @@ func vantageVersion() string {
 }
 
 // requireToken enforces the shared-secret header on every request.
-// backendToken is required at startup; we never reach here with it empty.
+// outpostToken is required at startup; we never reach here with it empty.
 func requireToken(next http.Handler) http.Handler {
-	want := []byte(backendToken)
+	want := []byte(outpostToken)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := []byte(r.Header.Get(tokenHeader))
 		if subtle.ConstantTimeCompare(got, want) != 1 {
-			writeErr(w, http.StatusUnauthorized, "invalid backend token")
+			writeErr(w, http.StatusUnauthorized, "invalid outpost token")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -249,7 +249,7 @@ var validRestartPolicies = map[string]bool{
 //  5. POST /containers/create to docker, then POST /start.
 //  6. Update audit target to the new container ID and respond 201.
 //
-// The whole call can take minutes for a cold pull; the auth proxy carves
+// The whole call can take minutes for a cold pull; the gate proxy carves
 // out a longer upstream timeout for this path. UI shows a "Pulling…"
 // pending state while the request is open.
 //
@@ -1472,10 +1472,10 @@ func streamHandler(m *Manager) http.HandlerFunc {
 	}
 }
 
-// localMux returns the handlers for this backend's own monitoring data —
+// localMux returns the handlers for this outpost's own monitoring data —
 // the snapshot endpoints, settings, and Cloudflare refresh. The dashboard's
-// auth-service proxy forwards calls here under the bare /api/* prefix
-// (with the X-Vantage-Backend-Token header attached server-side).
+// gate-service proxy forwards calls here under the bare /api/* prefix
+// (with the X-Vantage-Outpost-Token header attached server-side).
 func localMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
@@ -1556,14 +1556,14 @@ func localMux() *http.ServeMux {
 	})
 
 	// Firewall — list/add/delete host firewall rules through the host's
-	// systemd (transient unit). When no supported backend is detected the
+	// systemd (transient unit). When no supported firewall backend is detected the
 	// GET returns available=false; mutating endpoints return 503.
 	mux.HandleFunc("GET /firewall", firewallStatusHandler(manager))
 	mux.HandleFunc("POST /firewall/rules", firewallAddHandler(manager))
 	mux.HandleFunc("DELETE /firewall/rules", firewallDeleteHandler(manager))
 
 	// File manager — per-server host filesystem operations. All paths are
-	// host-relative; the backend maps them through /hostfs internally.
+	// host-relative; the outpost maps them through /hostfs internally.
 	// Every handler funnels through openat2(RESOLVE_BENEATH) via the
 	// safe* helpers in fs_safety_at.go, which also apply the denylist
 	// and role rules.
@@ -1588,7 +1588,7 @@ func localMux() *http.ServeMux {
 	mux.HandleFunc("POST /fs/chmod", fsChmodHandler())
 	mux.HandleFunc("POST /fs/chown", fsChownHandler())
 
-	// settings — local-only; each backend owns its own Cloudflare creds, etc.
+	// settings — local-only; each outpost owns its own Cloudflare creds, etc.
 	mux.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1701,12 +1701,12 @@ func localMux() *http.ServeMux {
 }
 
 func main() {
-	// 127.0.0.1 by default — backends never expose themselves publicly.
-	// Reach them via Docker DNS (auth → backend in the same network),
+	// 127.0.0.1 by default — outposts never expose themselves publicly.
+	// Reach them via Docker DNS (gate → outpost in the same network),
 	// Tailscale, WireGuard, or set --addr=0.0.0.0:8080 explicitly to
-	// expose on the LAN. The auth service stores the URL each user
+	// expose on the LAN. The gate service stores the URL each user
 	// adds via the SPA and proxies requests with the shared-secret
-	// token, so the backend itself only needs to listen where the
+	// token, so the outpost itself only needs to listen where the
 	// control plane can reach it.
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
 	flag.Parse()
@@ -1731,8 +1731,8 @@ func main() {
 	local := localMux()
 
 	root := http.NewServeMux()
-	// The SPA no longer talks to this backend directly; the auth-service
-	// proxy hits /api/<resource> with the X-Vantage-Backend-Token header.
+	// The SPA no longer talks to this outpost directly; the gate-service
+	// proxy hits /api/<resource> with the X-Vantage-Outpost-Token header.
 	// Per-resource handlers live in localMux().
 	root.Handle("/api/", http.StripPrefix("/api", local))
 
@@ -1744,8 +1744,8 @@ func main() {
 	root.HandleFunc("/swaggerui/", swaggerUIHandler)
 	root.HandleFunc("/swaggerui/static/", swaggerUIAssetHandler)
 
-	if backendToken == "" {
-		log.Fatal("VANTAGE_BACKEND_TOKEN must be set; refusing to start")
+	if outpostToken == "" {
+		log.Fatal("VANTAGE_OUTPOST_TOKEN must be set; refusing to start")
 	}
 	// Open the rooted handle every file op funnels through. Fails on
 	// kernels without openat2 (Linux <5.6) — we'd rather refuse to start

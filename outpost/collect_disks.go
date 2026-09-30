@@ -356,7 +356,7 @@ func nvmeOrSataLifeLeft(sm *smartctlOutput) int {
 var _ = strconv.Atoi
 
 // buildSmartDetail flattens the noisy smartctl JSON into the trimmed shape
-// the frontend consumes, runs the Scrutiny-style scorer over it, and returns
+// vantage-prime consumes, runs the Scrutiny-style scorer over it, and returns
 // a pointer ready to drop straight into Disk.Detail.
 func buildSmartDetail(sm *smartctlOutput) *SmartDetail {
 	d := &SmartDetail{

@@ -11,7 +11,7 @@ export interface EventStreamState<T> {
  * body as JSON-of-type-T.
  *
  * The browser's EventSource handles auto-reconnect natively, including
- * sending Last-Event-ID on retry — the backend uses that to skip the
+ * sending Last-Event-ID on retry — the outpost uses that to skip the
  * initial snapshot resend if the client is already current.
  *
  * Lifecycle:

@@ -172,7 +172,7 @@ export const ContainersTab = ({ snapshot, tt, serverId, serverHost }: Containers
   const canControl = useCan('operator');
   // Per-container in-flight action. Used to disable buttons and show a
   // pending state until the SSE stream's next snapshot reflects the new
-  // container state (within ~1s thanks to the backend's fast-poke).
+  // container state (within ~1s thanks to the outpost's fast-poke).
   const [pending, setPending] = React.useState<Record<string, 'start' | 'stop' | 'restart'>>({});
   const [inspectId, setInspectId] = React.useState<string | null>(null);
   const [logsTarget, setLogsTarget] = React.useState<{ id: string; name: string } | null>(null);

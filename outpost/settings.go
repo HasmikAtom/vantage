@@ -30,10 +30,10 @@ import (
 // restarts but is weak against an attacker who can read the env+file. The
 // recommended path is to set VANTAGE_ENCRYPTION_KEY explicitly.
 
-// StoredSettings is the persisted shape of the per-backend secret store.
+// StoredSettings is the persisted shape of the per-outpost secret store.
 // Today only Cloudflare credentials live here; the prior `Servers` list
-// moved to the auth service's per-user registry once the architecture
-// stopped having a single "primary" backend.
+// moved to the gate service's per-user registry once the architecture
+// stopped having a single "primary" outpost.
 type StoredSettings struct {
 	CloudflareAPIToken    string `json:"cloudflareApiToken,omitempty"`
 	CloudflareAccountID   string `json:"cloudflareAccountId,omitempty"`
@@ -118,7 +118,7 @@ func loadKey() ([]byte, error) {
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Fix BEFORE saving anything sensitive through the UI:")
 	fmt.Fprintln(os.Stderr, "  1. echo \"VANTAGE_ENCRYPTION_KEY=$(openssl rand -base64 32)\" >> .env")
-	fmt.Fprintln(os.Stderr, "  2. docker compose restart backend")
+	fmt.Fprintln(os.Stderr, "  2. docker compose restart outpost")
 	fmt.Fprintln(os.Stderr, "  3. Re-save any secrets through the dashboard's Settings page.")
 	fmt.Fprintln(os.Stderr, "************************************************************")
 	fmt.Fprintln(os.Stderr, "")

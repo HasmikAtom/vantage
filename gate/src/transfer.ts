@@ -1,13 +1,13 @@
 /**
  * Cross-outpost file transfer orchestrator.
  *
- * Lives in the auth service because that's the only process that holds
- * (server URL, encrypted token) tuples for a given user — outposts and
- * the local backend never know about each other directly, by design.
+ * Lives in the gate service because that's the only process that holds
+ * (server URL, encrypted token) tuples for a given user — outposts
+ * never know about each other directly, by design.
  *
  * Pipeline:
  *
- *   SPA ──POST /api/transfer──► auth (this file)
+ *   SPA ──POST /api/transfer──► gate (this file)
  *                                 │
  *                                 ├─► GET  /api/servers/<src>/fs/stat (size)
  *                                 │
@@ -22,7 +22,7 @@
  * terminates. Cancellation routes through an AbortController held on the
  * server side and tripped by DELETE /api/transfer/:id.
  *
- * State is in-memory only; an auth-service restart cancels all in-flight
+ * State is in-memory only; a gate-service restart cancels all in-flight
  * transfers. This is acceptable for a personal dashboard — losing partial
  * progress is annoying, not corrupting (the destination file may exist
  * empty, which is exactly the same as a network drop mid-upload).
@@ -65,7 +65,7 @@ export interface TransferState {
   bytesDone: number;
   // ms epoch of the last bytesDone advance. The streaming watchdog
   // aborts the transfer if this falls more than PROGRESS_STALL_MS
-  // behind real time, catching backends that connect-but-stall mid-pipe.
+  // behind real time, catching outposts that connect-but-stall mid-pipe.
   lastProgressMs: number;
   status: TransferStatus;
   error: string | null;
@@ -78,7 +78,7 @@ export interface TransferState {
 // Per-stage timeouts. The streaming download+receive is NOT bounded by a
 // fixed deadline (a 100GB transfer over a slow link is legitimate);
 // instead, a progress watchdog (PROGRESS_STALL_MS) aborts when bytesDone
-// stops advancing — that's what catches a connected-but-stalled backend.
+// stops advancing — that's what catches a connected-but-stalled outpost.
 const STAT_TIMEOUT_MS = 30_000;
 const CHMOD_TIMEOUT_MS = 30_000;
 const CHOWN_TIMEOUT_MS = 30_000;
@@ -88,7 +88,7 @@ const PROGRESS_WATCHDOG_TICK_MS = 5_000;
 
 // Cap on concurrent (pending|running) transfers per user. Prevents a
 // single user from pinning unbounded memory by queueing transfers
-// against a wedged backend. The handler surfaces this as a 429.
+// against a wedged outpost. The handler surfaces this as a 429.
 export const MAX_CONCURRENT_TRANSFERS_PER_USER = 8;
 
 /**
@@ -200,7 +200,7 @@ async function pinnedIpFor(
 
 /**
  * Builds the connect URL + Host header for a fetch against a registered
- * backend. For http we connect by IP literal and force the Host header
+ * outpost. For http we connect by IP literal and force the Host header
  * to the original hostname. For https we keep the URL hostname (so SNI
  * + cert validation work) and re-check live DNS to catch a rebind
  * between registration and now.
@@ -267,7 +267,7 @@ async function runTransfer(state: TransferState): Promise<void> {
     const statSignal = anySignal([state.abort.signal, AbortSignal.timeout(STAT_TIMEOUT_MS)]);
     const statResp = await fetch(connectURL, {
       headers: {
-        ...backendHeaders(src.token, state.userRole),
+        ...outpostHeaders(src.token, state.userRole),
         ...(hostHeader ? { Host: hostHeader } : {}),
       },
       signal: statSignal,
@@ -308,7 +308,7 @@ async function runTransfer(state: TransferState): Promise<void> {
   // There is no fixed-deadline cap on this stage — a legitimate 100GB
   // transfer over a slow link can take hours — but if bytesDone hasn't
   // advanced in PROGRESS_STALL_MS, we abort with a "stalled" error.
-  // This catches a backend that opened the socket but stopped feeding
+  // This catches an outpost that opened the socket but stopped feeding
   // bytes (or a destination that stopped consuming them).
   const stallController = new AbortController();
   state.lastProgressMs = Date.now();
@@ -334,7 +334,7 @@ async function runTransfer(state: TransferState): Promise<void> {
       const downloadSignal = anySignal([state.abort.signal, stallController.signal]);
       srcResp = await fetch(connectURL, {
         headers: {
-          ...backendHeaders(src.token, state.userRole),
+          ...outpostHeaders(src.token, state.userRole),
           ...(hostHeader ? { Host: hostHeader } : {}),
         },
         signal: downloadSignal,
@@ -399,7 +399,7 @@ async function runTransfer(state: TransferState): Promise<void> {
       const recvResp = await fetch(connectURL, {
         method: 'POST',
         headers: {
-          ...backendHeaders(dst.token, state.userRole),
+          ...outpostHeaders(dst.token, state.userRole),
           ...(hostHeader ? { Host: hostHeader } : {}),
           'Content-Type': 'application/octet-stream',
         },
@@ -432,8 +432,8 @@ async function runTransfer(state: TransferState): Promise<void> {
   // Optionally apply source ownership + mode to the destination. We do
   // this BEFORE the move-mode delete so a chmod/chown failure surfaces
   // before we drop the source — the user can recover. Requires admin
-  // role because chmod/chown on the backend are admin-only; we don't
-  // pre-check on this end because the backend's role gate will reject
+  // role because chmod/chown on the outpost are admin-only; we don't
+  // pre-check on this end because the outpost's role gate will reject
   // cleanly with a clear error if the caller isn't admin.
   if (state.preserveSourceOwnership) {
     try {
@@ -443,7 +443,7 @@ async function runTransfer(state: TransferState): Promise<void> {
       const chmodResp = await fetch(chmodReq.connectURL, {
         method: 'POST',
         headers: {
-          ...backendHeaders(dst.token, state.userRole),
+          ...outpostHeaders(dst.token, state.userRole),
           ...(chmodReq.hostHeader ? { Host: chmodReq.hostHeader } : {}),
           'Content-Type': 'application/json',
         },
@@ -462,7 +462,7 @@ async function runTransfer(state: TransferState): Promise<void> {
       const chownResp = await fetch(chownReq.connectURL, {
         method: 'POST',
         headers: {
-          ...backendHeaders(dst.token, state.userRole),
+          ...outpostHeaders(dst.token, state.userRole),
           ...(chownReq.hostHeader ? { Host: chownReq.hostHeader } : {}),
           'Content-Type': 'application/json',
         },
@@ -497,7 +497,7 @@ async function runTransfer(state: TransferState): Promise<void> {
       const delResp = await fetch(delReq.connectURL, {
         method: 'DELETE',
         headers: {
-          ...backendHeaders(src.token, state.userRole),
+          ...outpostHeaders(src.token, state.userRole),
           ...(delReq.hostHeader ? { Host: delReq.hostHeader } : {}),
         },
         signal: delSignal,
@@ -538,9 +538,9 @@ function failed(state: TransferState, msg: string): void {
   notify(state);
 }
 
-function backendHeaders(token: string, role: string): Record<string, string> {
+function outpostHeaders(token: string, role: string): Record<string, string> {
   return {
-    'X-Vantage-Backend-Token': token,
+    'X-Vantage-Outpost-Token': token,
     'X-Vantage-Role': role,
   };
 }
@@ -584,7 +584,7 @@ export async function createTransfer(c: Context, user: AuthedUser): Promise<Resp
     return c.json({ error: 'source and destination are identical' }, 400);
   }
   // Role gate — same bar the proxy enforces for write paths on the
-  // backend. We re-check here so a viewer can't kick off a transfer.
+  // outpost. We re-check here so a viewer can't kick off a transfer.
   if (user.role === 'viewer') {
     return c.json({ error: 'operator role required' }, 403);
   }
@@ -594,7 +594,7 @@ export async function createTransfer(c: Context, user: AuthedUser): Promise<Resp
   }
   // Per-user concurrency cap. A single user with N tabs (or a script)
   // could otherwise accumulate unbounded in-flight entries against a
-  // wedged backend. Each entry holds an AbortController + a piece of
+  // wedged outpost. Each entry holds an AbortController + a piece of
   // the source ReadableStream, so the cap also bounds worst-case RAM.
   let activeForUser = 0;
   for (const t of transfers.values()) {

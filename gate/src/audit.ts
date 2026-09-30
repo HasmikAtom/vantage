@@ -1,6 +1,6 @@
 /**
  * Audit log — persistent record of user-initiated actions against any
- * registered backend. Lives in the same SQLite database as BetterAuth so
+ * registered outpost. Lives in the same SQLite database as BetterAuth so
  * we get atomic backups and queryable joins to the user table for free.
  *
  * Schema decision and retention policy are documented in
@@ -98,7 +98,7 @@ export function startAuditRetention(): () => void {
     try {
       sweepAudit();
     } catch (err) {
-      // Don't crash the auth service if the sweep fails — the audit
+      // Don't crash the gate service if the sweep fails — the audit
       // log is forensic, not load-bearing. Log and continue.
       console.error('audit sweep failed:', err);
     }

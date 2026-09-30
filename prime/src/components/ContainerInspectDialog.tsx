@@ -42,7 +42,7 @@ function formatMemory(bytes: number): string {
  * on open and renders a structured view: state, image, command, env vars,
  * labels, host config, mounts, networks.
  *
- * Gated to operator+ at the backend; viewers get 403 if they somehow reach
+ * Gated to operator+ at the outpost; viewers get 403 if they somehow reach
  * here (the UI hides the trigger button for them, but the gate is the
  * source of truth).
  */

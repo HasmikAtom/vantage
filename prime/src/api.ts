@@ -22,8 +22,8 @@ const BASE = '/api';
 
 // All per-server endpoints are nested under /api/servers/<id>/...
 // Every server id was added by the user via the Settings or first-run
-// form; the auth service stores the URL + encrypted token and proxies
-// these calls to the matching backend with the token attached server-side.
+// form; the gate service stores the URL + encrypted token and proxies
+// these calls to the matching outpost with the token attached server-side.
 function serverBase(serverId: string): string {
   return `${BASE}/servers/${encodeURIComponent(serverId)}`;
 }
@@ -61,7 +61,7 @@ export class ApiError extends Error {
 }
 
 // Extract a useful error message from a non-OK response. Tries JSON first
-// (most backend handlers return `{error: "..."}`), then falls back to raw
+// (most outpost handlers return `{error: "..."}`), then falls back to raw
 // text (saveCloudflareSettings historically used this), then to a generic
 // `API <status>`. The parsed value (or null) is attached to ApiError.data
 // so callers can do further inspection.
@@ -99,8 +99,8 @@ function buildInit(init: ApiInit): RequestInit {
   // this client carries a non-standard header. Any cross-origin attempt
   // (e.g. an attacker page POSTing a form to our origin to abuse the
   // user's session) cannot set this header without triggering a CORS
-  // preflight, which the auth service does NOT grant. Combined with
-  // the existing SameSite=lax + the auth-side CSRF middleware that
+  // preflight, which the gate service does NOT grant. Combined with
+  // the existing SameSite=lax + the gate-side CSRF middleware that
   // requires this header on mutating routes, that closes the practical
   // CSRF surface for the custom /api/* endpoints. Built-in form posts
   // and same-site iframe abuses are blocked at the browser layer.
@@ -152,10 +152,10 @@ export async function apiFetchRaw(url: string, init: ApiInit = {}): Promise<Resp
 }
 
 // ---------------------------------------------------------------------------
-// Servers registry (auth service)
+// Servers registry (gate service)
 // ---------------------------------------------------------------------------
 
-// ServerSummary mirrors the shape the auth service returns from
+// ServerSummary mirrors the shape the gate service returns from
 // `GET /api/servers` — the registry now lives there, encrypted per user,
 // and the token is never sent back to the client.
 export interface ServerSummary {
@@ -169,7 +169,7 @@ export function fetchServers(): Promise<ServerSummary[]> {
   return apiFetch<ServerSummary[]>(`${BASE}/servers`);
 }
 
-// The auth service probes `${url}/api/health` with the supplied token before
+// The gate service probes `${url}/api/health` with the supplied token before
 // persisting; a 502 here means the URL/token combination isn't reachable.
 export function addServer(input: {
   name: string;
@@ -230,10 +230,10 @@ export function clearCloudflareSettings(serverId: string): Promise<void> {
 
 // refreshCloudflareTunnels triggers an immediate Cloudflare API fetch on the
 // active server, bypassing the scheduled interval. The new tunnel snapshot
-// is pushed to the dashboard via the SSE stream as soon as the backend's
+// is pushed to the dashboard via the SSE stream as soon as the outpost's
 // snapshot version bumps.
 //
-// The backend may return 200 with `{refresh: "<error msg>"}` to surface a
+// The outpost may return 200 with `{refresh: "<error msg>"}` to surface a
 // soft-failure from Cloudflare itself (network blip, rate-limit) without
 // failing the request — we promote that into a thrown Error so the UI's
 // toast shows it.
@@ -251,7 +251,7 @@ export async function refreshCloudflareTunnels(serverId: string): Promise<void> 
 //
 // These return on POST completion (202 Accepted); they do NOT carry the new
 // container state. The UI reconciles from the SSE stream, which is updated
-// within ~1s by the backend's fast-poke (immediate refreshMedium after the
+// within ~1s by the outpost's fast-poke (immediate refreshMedium after the
 // command succeeds). Callers should flip an optimistic local "pending"
 // state while awaiting, and remove it once the SSE update arrives — or on
 // rejection.
@@ -281,7 +281,7 @@ export function restartContainer(serverId: string, id: string): Promise<void> {
 
 // removeContainer issues a DELETE against the container endpoint.
 //
-// `force=true` SIGKILLs a running container before removal — the backend
+// `force=true` SIGKILLs a running container before removal — the outpost
 // returns 409 if the container is running without it, which the UI uses as
 // a signal to show a second confirm step rather than failing silently.
 //
@@ -296,7 +296,7 @@ export class ContainerRunningError extends Error {
 }
 
 // createContainer pulls the image if missing, creates, and starts a single
-// container. Can take minutes on a cold image pull — the auth proxy gives
+// container. Can take minutes on a cold image pull — the gate proxy gives
 // this endpoint a 6-minute upstream timeout; callers should communicate
 // that with a "Pulling…" pending state instead of treating slowness as
 // failure.
@@ -333,8 +333,8 @@ export async function removeContainer(
 }
 
 // inspectContainer fetches the typed inspect view for one container. Returns
-// the JSON payload directly; throws on non-2xx with the backend's error
-// message. Gated to operator+ on the backend.
+// the JSON payload directly; throws on non-2xx with the outpost's error
+// message. Gated to operator+ on the outpost.
 export function inspectContainer(
   serverId: string,
   id: string,
@@ -351,7 +351,7 @@ export function inspectContainer(
 // ---------------------------------------------------------------------------
 //
 // Like createContainer, the write paths here can run long (compose up with
-// cold pulls regularly takes minutes). The auth proxy gives stacks write
+// cold pulls regularly takes minutes). The gate proxy gives stacks write
 // endpoints a 12-minute upstream timeout — callers should show a "Pulling
 // & deploying…" pending state and avoid treating slow as failure.
 
@@ -391,7 +391,7 @@ export function updateStack(
   });
 }
 
-// deriveStackYAML asks the backend to reverse-engineer a fresh
+// deriveStackYAML asks the outpost to reverse-engineer a fresh
 // docker-compose.yml from a discovered stack's member containers
 // (`docker inspect` projected into YAML). Used by the "Recreate as
 // managed" flow when the original compose file is gone.
@@ -466,7 +466,7 @@ export function applyReclaimContainers(serverId: string, ids: string[]) {
   return applyReclaim(serverId, 'containers', ids);
 }
 // Volumes are addressed by name on the docker API, but the request shape
-// (and the backend's loop) accepts the same `{ids: [...]}` body — kept as
+// (and the outpost's loop) accepts the same `{ids: [...]}` body — kept as
 // a separate helper so the call site reads correctly.
 export function applyReclaimVolumes(serverId: string, names: string[]) {
   return applyReclaim(serverId, 'volumes', names);
@@ -478,7 +478,7 @@ export function pruneBuildCache(serverId: string): Promise<ReclaimResult> {
   });
 }
 
-// Firewall — host firewall rule management. The backend abstracts over the
+// Firewall — host firewall rule management. The outpost abstracts over the
 // installed firewall (ufw today, firewalld/nftables possible later); if
 // nothing is detected on the host the status response will be
 // `{available: false}` and the UI should render a placeholder rather than
@@ -495,7 +495,7 @@ export function addFirewallRule(serverId: string, rule: FirewallRule): Promise<v
 }
 
 // deleteFirewallRule sends the full canonical tuple in the body so the
-// backend can re-resolve the rule under its own lock. Never use a
+// outpost can re-resolve the rule under its own lock. Never use a
 // positional index here — ufw renumbers on every edit.
 export function deleteFirewallRule(serverId: string, rule: FirewallRule): Promise<void> {
   return apiFetch<void>(`${serverBase(serverId)}/firewall/rules`, {
@@ -505,8 +505,8 @@ export function deleteFirewallRule(serverId: string, rule: FirewallRule): Promis
 }
 
 // -- File manager --------------------------------------------------------
-// All paths are HOST-relative (the backend maps them through /hostfs
-// internally). Every endpoint passes through resolveSafe on the backend
+// All paths are HOST-relative (the outpost maps them through /hostfs
+// internally). Every endpoint passes through resolveSafe on the outpost
 // which gates against the denylist + role rules; the UI can call freely
 // and surface server-side denials through the standard error path.
 
@@ -581,7 +581,7 @@ export function fsDelete(serverId: string, path: string): Promise<void> {
 }
 
 // fsDownloadURL returns the URL the browser should hit to stream-download
-// the file via the auth proxy. Using a plain anchor or window.open
+// the file via the gate proxy. Using a plain anchor or window.open
 // preserves filename + Content-Disposition handling without us needing to
 // re-stream through the SPA.
 export function fsDownloadURL(serverId: string, path: string): string {
@@ -589,7 +589,7 @@ export function fsDownloadURL(serverId: string, path: string): string {
 }
 
 // fsUpload accepts a single File and POSTs it as multipart/form-data with
-// the destination directory in the query. The backend takes the filename
+// the destination directory in the query. The outpost takes the filename
 // from the part (override via ?name=). We pass the FormData via `rawBody`
 // — apiFetch leaves Content-Type unset so the browser injects the correct
 // multipart boundary.
@@ -610,7 +610,7 @@ export function fsUpload(
 }
 
 // -- Cross-outpost file transfer ----------------------------------------
-// Orchestrated by the auth service: it streams from the source backend's
+// Orchestrated by the gate service: it streams from the source outpost's
 // download endpoint straight into the destination's receive endpoint with
 // no buffering at this end. The SPA fires a POST to create, watches an
 // SSE stream for progress, and can DELETE to cancel mid-flight.
@@ -647,7 +647,7 @@ export function cancelTransfer(id: string): Promise<void> {
 }
 
 // transferStreamURL is the SSE URL the caller should subscribe to via
-// EventSource. The frontend builds a single subscription per active
+// EventSource. vantage-prime builds a single subscription per active
 // transfer and feeds events into the global TransferStore.
 export function transferStreamURL(id: string): string {
   return `${BASE}/transfer/${encodeURIComponent(id)}/stream`;

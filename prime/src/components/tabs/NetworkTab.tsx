@@ -296,7 +296,7 @@ function TunnelSection({ tunnels, onTunnelClick, serverId }: TunnelSectionProps)
 // ---------------------------------------------------------------------------
 // Firewall — host firewall (ufw, etc.) rule management.
 //
-// The backend abstracts the actual firewall tool away; if nothing supported
+// The outpost abstracts the actual firewall tool away; if nothing supported
 // is detected on the host the API returns {available: false} and we render
 // a friendly placeholder instead of treating it as an error.
 //
@@ -469,7 +469,7 @@ interface AddRuleFormProps {
 // Minimal add form: port (+ optional range), proto, direction, action, source.
 // We accept only the common fields here; advanced shapes (named services,
 // per-interface rules, limit/reject) need to be added in the UI before
-// they're useful, even if the backend already supports them.
+// they're useful, even if the outpost already supports them.
 function AddRuleForm({ onSubmit }: AddRuleFormProps) {
   const [port, setPort] = React.useState('');
   const [portEnd, setPortEnd] = React.useState('');

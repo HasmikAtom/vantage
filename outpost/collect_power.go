@@ -14,7 +14,7 @@ import (
 //
 // Each domain exposes a monotonic energy_uj counter in microjoules. Watts =
 // Δenergy / Δtime. The counter is root-only (mode 0400) — works inside our
-// container because the backend runs as root with SYS_ADMIN. AMD systems
+// container because the outpost runs as root with SYS_ADMIN. AMD systems
 // expose the same interface via amd_energy on recent kernels.
 //
 // The counter wraps at max_energy_range_uj (typically every ~60s under load

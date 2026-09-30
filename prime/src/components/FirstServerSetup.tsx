@@ -65,7 +65,7 @@ export function FirstServerSetup({
 
         <p className="text-xs text-muted-foreground mb-5">
           Welcome, <span className="font-mono">{userEmail}</span>. Point this dashboard at a
-          running Vantage backend to start collecting metrics. The URL and the backend's
+          running vantage-outpost to start collecting metrics. The URL and the outpost's
           shared-secret token are stored encrypted; only this browser session can see
           them in transit.
         </p>
@@ -91,7 +91,7 @@ export function FirstServerSetup({
             <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
               URL
               <span className="ml-2 normal-case tracking-normal text-muted-foreground/70">
-                the backend's base URL — e.g. <span className="font-mono">http://100.64.0.5:8080</span>
+                the outpost's base URL — e.g. <span className="font-mono">http://100.64.0.5:8080</span>
               </span>
             </div>
             <Input
@@ -107,7 +107,7 @@ export function FirstServerSetup({
             <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
               Token
               <span className="ml-2 normal-case tracking-normal text-muted-foreground/70">
-                <span className="font-mono">VANTAGE_BACKEND_TOKEN</span> from the backend's env
+                <span className="font-mono">VANTAGE_OUTPOST_TOKEN</span> from the outpost's env
               </span>
             </div>
             <Input
@@ -125,7 +125,7 @@ export function FirstServerSetup({
             disabled={busy || !name || !url || !token}
             className="w-full"
           >
-            {busy ? 'Probing backend…' : 'Add server'}
+            {busy ? 'Probing outpost…' : 'Add server'}
           </Button>
         </form>
 
@@ -143,11 +143,11 @@ export function FirstServerSetup({
         <div className="mt-5 flex items-center justify-between text-[11px] text-muted-foreground">
           <a
             className="hover:text-foreground"
-            href="https://github.com/anthropics/vantage-dashboard#installing-a-backend"
+            href="https://github.com/anthropics/vantage-dashboard#installing-an-outpost"
             target="_blank"
             rel="noreferrer"
           >
-            How do I run a backend?
+            How do I run an outpost?
           </a>
           <button
             type="button"

@@ -2,8 +2,8 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "go build -o ./tmp/vantage-api ."
-  bin = "./tmp/vantage-api"
+  cmd = "go build -o ./tmp/vantage-outpost ."
+  bin = "./tmp/vantage-outpost"
   args_bin = ["-addr=:8080"]
   include_ext = ["go"]
   exclude_dir = ["tmp"]

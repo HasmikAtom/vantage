@@ -27,7 +27,7 @@ type FirewallProvider interface {
 }
 
 // ErrFirewallUnsupported is returned by handlers when no supported backend
-// was detected on this host. The frontend surfaces this as a greyed-out
+// was detected on this host. vantage-prime surfaces this as a greyed-out
 // section with an explanatory message.
 var ErrFirewallUnsupported = errors.New("no supported firewall backend on this host")
 
