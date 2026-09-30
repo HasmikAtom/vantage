@@ -25,7 +25,7 @@ RUN apt-get update \
       docker-ce-cli \
       docker-compose-plugin \
  && rm -rf /var/lib/apt/lists/* \
- && go install github.com/air-verse/air@latest
+ && go install github.com/air-verse/air@v1.67.0
 
 WORKDIR /app
 ENV CGO_ENABLED=0
