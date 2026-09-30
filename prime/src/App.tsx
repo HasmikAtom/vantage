@@ -28,7 +28,7 @@ const UsersTab = React.lazy(() =>
   import('./components/tabs/UsersTab').then((m) => ({ default: m.UsersTab })),
 );
 const FilesTab = React.lazy(() =>
-  import('./components/tabs/FilesTab').then((m) => ({ default: m.FilesTab })),
+  import('./components/files/FilesTab').then((m) => ({ default: m.FilesTab })),
 );
 
 // Centred placeholder shown while a lazy tab chunk is loading. Plain
