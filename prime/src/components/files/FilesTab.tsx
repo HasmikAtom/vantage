@@ -2,10 +2,14 @@ import * as React from 'react';
 import type { FsEntry } from '@/types';
 import { ApiError, type TransferProgress } from '@/api';
 import { useCan } from '@/auth';
+import { cn } from '@/lib/utils';
 import { Button, Card } from '@/components/ui/primitives';
 import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
 import { SectionHeader } from '@/components/SectionHeader';
 import { AddressBar } from './AddressBar';
+import { Sidebar } from './Sidebar';
+import { usePins } from './hooks/usePins';
+import { addPin } from './logic/pins';
 import { FileList } from './FileList';
 import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
@@ -91,6 +95,13 @@ export function FilesTab({ serverId }: FilesTabProps) {
   const nav = useNavHistory();
   const { data, loading, error, reload } = useDirListing(serverId, nav.path);
   const clipboard = useClipboard();
+  const { pins, save: savePins, error: pinsError } = usePins(serverId);
+  const [sidebarOpen, setSidebarOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (pinsError) setBanner(`Pins: ${pinsError}`);
+  }, [pinsError]);
+
   const [showHidden, setShowHidden] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const [sort, setSort] = React.useState<SortSpec>(loadSort);
@@ -136,6 +147,7 @@ export function FilesTab({ serverId }: FilesTabProps) {
     dispatch({ type: 'clear' });
     setQuery('');
     setMenu(null);
+    setSidebarOpen(false);
   }, [nav.path, serverId]);
 
   React.useEffect(() => {
@@ -242,6 +254,7 @@ export function FilesTab({ serverId }: FilesTabProps) {
     copyTo: (e) => setModal({ kind: 'copyMove', entry: e, mode: 'copy' }),
     moveTo: (e) => setModal({ kind: 'copyMove', entry: e, mode: 'move' }),
     copyPath: (e) => void copyText(e.path),
+    pin: (e) => void savePins(addPin(pins, e.path)),
     sendTo: (e) => setModal({ kind: 'sendTo', entry: e }),
     perms: (e) => setModal({ kind: 'perms', entry: e }),
     trash: confirmTrash,
@@ -404,6 +417,30 @@ export function FilesTab({ serverId }: FilesTabProps) {
 
       <Card className="overflow-hidden">
         <div className="flex min-h-[420px]">
+          {sidebarOpen && (
+            <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />
+          )}
+          <aside
+            className={cn(
+              'w-56 shrink-0 border-r bg-muted/10',
+              sidebarOpen
+                ? 'fixed inset-y-0 left-0 z-40 block w-64 bg-background shadow-xl md:static md:z-auto md:w-56 md:bg-muted/10 md:shadow-none'
+                : 'hidden md:block',
+            )}
+          >
+            <Sidebar
+              serverId={serverId}
+              currentPath={nav.path}
+              showHidden={showHidden}
+              refreshKey={sizesKey}
+              pins={pins}
+              onPinsChange={(next) => void savePins(next)}
+              onNavigate={(p) => {
+                setSidebarOpen(false);
+                nav.go(p);
+              }}
+            />
+          </aside>
           <div
             ref={rootRef}
             tabIndex={0}
@@ -421,6 +458,7 @@ export function FilesTab({ serverId }: FilesTabProps) {
               onNavigate={nav.go}
               validate={validatePath}
               editSignal={editAddress}
+              onToggleSidebar={() => setSidebarOpen((v) => !v)}
             />
             <Toolbar
               canControl={canControl}
