@@ -18,8 +18,12 @@ services:
       # AES-256-GCM key for encrypting outpost tokens in the server registry.
       # Generate once with `openssl rand -base64 32` and persist.
       VANTAGE_REGISTRY_KEY: ${VANTAGE_REGISTRY_KEY:?VANTAGE_REGISTRY_KEY must be set (openssl rand -base64 32)}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_DEV_PRIME_PORT:-5173}}
-      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:${VANTAGE_DEV_PRIME_PORT:-5173},http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_DEV_PRIME_PORT:-5173},http://${VANTAGE_LAN_IP:-127.0.0.1}:${VANTAGE_DEV_PRIME_PORT:-5173},http://localhost:${VANTAGE_PROD_PORT:-8088}}
+      # Dev's own URL and origins. Not BETTER_AUTH_URL / TRUSTED_ORIGINS:
+      # those in .env describe the main stack (:8088), and inheriting them
+      # made the dev gate reject sign-ins from its own page (:5173) as an
+      # invalid origin.
+      BETTER_AUTH_URL: ${GATE_DEV_AUTH_URL:-http://${VANTAGE_LAN_IP:-localhost}:${VANTAGE_DEV_PRIME_PORT:-5173}}
+      TRUSTED_ORIGINS: ${GATE_DEV_TRUSTED_ORIGINS:-http://localhost:${VANTAGE_DEV_PRIME_PORT:-5173},http://${VANTAGE_HOSTNAME:-localhost}:${VANTAGE_DEV_PRIME_PORT:-5173},http://${VANTAGE_LAN_IP:-127.0.0.1}:${VANTAGE_DEV_PRIME_PORT:-5173}}
       GATE_RP_ID:     ${GATE_RP_ID:-${VANTAGE_HOSTNAME:-localhost}}
       GATE_RP_NAME:   ${GATE_RP_NAME:-Vantage (dev)}
       GITHUB_CLIENT_ID:     ${GITHUB_CLIENT_ID:-}
