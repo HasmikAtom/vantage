@@ -106,6 +106,7 @@ export const auth = betterAuth({
   // origin per vite.config.ts) is HTTPS-only.
   advanced: {
     useSecureCookies: env.isProduction,
+    cookiePrefix: env.cookiePrefix,
     defaultCookieAttributes: {
       httpOnly: true,
       secure: env.isProduction,

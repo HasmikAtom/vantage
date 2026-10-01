@@ -3,6 +3,8 @@
  * Throws at startup if a required-for-production value is missing.
  */
 
+import { cookiePrefix } from './cookiePrefix.js';
+
 function required(name: string): string {
   const v = process.env[name];
   if (!v) {
@@ -39,6 +41,10 @@ export const env = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
+
+  // Session cookie name prefix; set differently on a second stack that
+  // shares this host (see cookiePrefix.ts).
+  cookiePrefix: cookiePrefix(process.env.GATE_COOKIE_PREFIX),
 
   // Passkey relying party — must match the origin host the user sees.
   rpID: optional('GATE_RP_ID', 'localhost'),

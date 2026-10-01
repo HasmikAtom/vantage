@@ -30,6 +30,10 @@ services:
       # outpost's address on every lookup, so private ranges must be allowed
       # here (same default as docker-compose.prime.yml / prod.yml).
       GATE_SSRF_ALLOW_PRIVATE: ${GATE_SSRF_ALLOW_PRIVATE:-1}
+      # Own session cookie name: cookies ignore the port, so on a host that
+      # also runs the main stack, a shared name would log you out of one
+      # every time you sign in to the other.
+      GATE_COOKIE_PREFIX: ${GATE_DEV_COOKIE_PREFIX:-vantage-dev}
     volumes:
       - ./gate:/app
       - vantage-dev-gate-modules:/app/node_modules
