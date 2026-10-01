@@ -679,6 +679,11 @@ export function transferStreamURL(id: string): string {
   return `${BASE}/transfer/${encodeURIComponent(id)}/stream`;
 }
 
+// One-shot status of a transfer (polling alternative to the SSE stream).
+export function fetchTransferStatus(id: string): Promise<TransferProgress> {
+  return apiFetch<TransferProgress>(`${BASE}/transfer/${encodeURIComponent(id)}`);
+}
+
 // -- Trash management ---------------------------------------------------
 
 export function fsTrashList(serverId: string): Promise<TrashItem[]> {

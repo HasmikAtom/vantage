@@ -1,5 +1,5 @@
 import type { FsEntry, FsEntryType } from '@/types';
-import { cancelTransfer, createTransfer, fsDelete, fsList, fsMkdir, transferStreamURL } from '@/api';
+import { cancelTransfer, createTransfer, fetchTransferStatus, fsDelete, fsList, fsMkdir } from '@/api';
 import { baseName, copyName, formatBytes, joinPath, parentOf } from './fsPath';
 import { fetchListing } from './hooks/useDirListing';
 import type { AskConflict, RunBulk } from './hooks/useBulkRunner';
@@ -13,7 +13,7 @@ import {
   type CrossSource,
 } from './logic/crossPlan';
 import { joinRel } from './logic/upload';
-import { awaitTransfer } from './transferWatch';
+import { pollTransfer } from './transferWatch';
 
 // Copies or moves files and folders from one server to another through
 // gate's existing single-file transfer API. Folders are walked in the
@@ -43,7 +43,7 @@ export const defaultCrossApi: CrossApi = {
   },
   mkdir: (serverId, path) => fsMkdir(serverId, path),
   startTransfer: async (req) => (await createTransfer({ ...req, mode: 'copy' })).id,
-  awaitTransfer: (id) => awaitTransfer(transferStreamURL(id)),
+  awaitTransfer: (id) => pollTransfer(id, fetchTransferStatus),
   cancelTransfer: (id) => cancelTransfer(id),
   trash: (serverId, path) => fsDelete(serverId, path),
 };
