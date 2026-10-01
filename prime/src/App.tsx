@@ -366,7 +366,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
           </div>
         </div>
 
-        <main className="px-8 py-6">
+        {/* Files is an app-style explorer: it fills the screen edge to edge. */}
+        <main className={tab === 'files' ? 'p-3' : 'px-8 py-6'}>
           <StatusBar
             services={snapshot.services ?? []}
             updates={snapshot.updates}

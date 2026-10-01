@@ -7,7 +7,7 @@ export const SIDEBAR_WIDTH_KEY = 'vantage.files.sidebarWidth';
 
 // Room the file list keeps beside the sidebar: one pane, or two in split view.
 const MAIN_MIN = 360;
-const SPLIT_MAIN_MIN = 640;
+const SPLIT_MAIN_MIN = 720; // two panes at PANE_MIN_PX
 
 // Clamp a requested width to 160–480 px and to what the card can spare.
 export function clampSidebarWidth(width: number, containerWidth: number, split: boolean): number {

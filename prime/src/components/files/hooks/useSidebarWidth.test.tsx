@@ -99,7 +99,7 @@ describe('useSidebarWidth — split view cap', () => {
     act(() => root.render(<Probe split={false} />));
     expect(api.width).toBe(480);
     act(() => root.render(<Probe split />));
-    expect(api.width).toBe(360);
+    expect(api.width).toBe(280);
     act(() => root.render(<Probe split={false} />));
     expect(api.width).toBe(480);
     expect(localStorage.getItem(SIDEBAR_WIDTH_KEY)).toBe('480');

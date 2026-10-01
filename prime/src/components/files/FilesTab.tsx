@@ -9,6 +9,7 @@ import { FilePane, type PaneCommand, type PaneId } from './FilePane';
 import { Sidebar } from './Sidebar';
 import { useSidebarWidth } from './hooks/useSidebarWidth';
 import { useFillHeight } from './hooks/useFillHeight';
+import { usePaneRatio } from './hooks/usePaneRatio';
 import { EDITOR_MAX_BYTES, ROOT } from './fsPath';
 import { backgroundMenu, itemMenu, type MenuCtx } from './menus';
 import { useFileActions } from './useFileActions';
@@ -169,9 +170,12 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const bodyRef = React.useRef<HTMLDivElement>(null);
   const sidebar = useSidebarWidth(bodyRef, split);
-  // Desktop: the card fills the window so only the list and sidebar scroll.
+  // The card fills the rest of the window (12 px = the page's padding on
+  // this tab), so only the list and sidebar scroll.
   const cardRef = React.useRef<HTMLDivElement>(null);
-  const cardHeight = useFillHeight(cardRef, 24);
+  const cardHeight = useFillHeight(cardRef, 12);
+  const panesRef = React.useRef<HTMLDivElement>(null);
+  const panes = usePaneRatio(panesRef, split && wide);
   const [showHidden, setShowHidden] = React.useState(false);
   const [sort, setSort] = React.useState<SortSpec>(loadSort);
   const [banner, setBanner] = React.useState<string | null>(null);
@@ -575,7 +579,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
         <Card className="flex h-full flex-col overflow-hidden">
           <div
             ref={bodyRef}
-            className="flex min-h-[420px] flex-1 md:min-h-0"
+            className="flex min-h-0 flex-1"
             style={{ '--files-sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
           >
             {sidebarOpen && (
@@ -636,11 +640,26 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
                 </div>
                 {renderPane(activePane)}
               </div>
+            ) : split ? (
+              <div ref={panesRef} className="flex min-h-0 min-w-0 flex-1">
+                <div className="flex min-h-0 min-w-0" style={{ flex: `${panes.ratio} 1 0%` }}>
+                  {renderPane('left')}
+                </div>
+                {/* Divider: sits over the right pane's border. */}
+                <div
+                  {...panes.handleProps}
+                  className={cn(
+                    'relative z-10 -mr-[3px] w-[5px] shrink-0 cursor-col-resize touch-none outline-none transition-colors',
+                    'hover:bg-primary/30 focus-visible:bg-primary/40',
+                    panes.dragging && 'bg-primary/50',
+                  )}
+                />
+                <div className="flex min-h-0 min-w-0" style={{ flex: `${1 - panes.ratio} 1 0%` }}>
+                  {renderPane('right')}
+                </div>
+              </div>
             ) : (
-              <>
-                {renderPane('left')}
-                {split && renderPane('right')}
-              </>
+              renderPane('left')
             )}
           </div>
         </Card>

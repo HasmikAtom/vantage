@@ -31,7 +31,7 @@ export function Toolbar(p: ToolbarProps) {
   return (
     // Rendered inside the address bar's row (see AddressBar children).
     // In a split pane it takes its own line under the path.
-    <div className={cn('flex min-w-0 items-center gap-1.5', p.split && 'w-full')}>
+    <div className={cn('flex min-w-0 flex-wrap items-center gap-1.5', p.split && 'w-full')}>
       <Button
         size="xs"
         variant="outline"
@@ -60,7 +60,7 @@ export function Toolbar(p: ToolbarProps) {
       >
         <UploadIcon size={11} /> Upload ▾
       </Button>
-      <div className="ml-auto flex min-w-0 items-center gap-2">
+      <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
         {(p.canSplit || p.split) && (
           <Button
             size="xs"

@@ -16,8 +16,8 @@ describe('clampSidebarWidth', () => {
   it('leaves the file list at least 360 px in single view', () => {
     expect(clampSidebarWidth(480, 800, false)).toBe(440);
   });
-  it('leaves both panes room in split view', () => {
-    expect(clampSidebarWidth(480, 1000, true)).toBe(360);
+  it('leaves both panes their 360 px in split view', () => {
+    expect(clampSidebarWidth(480, 1100, true)).toBe(380);
   });
   it('never goes below the minimum, even in a narrow card', () => {
     expect(clampSidebarWidth(300, 500, true)).toBe(SIDEBAR_MIN);
