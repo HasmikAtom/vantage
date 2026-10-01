@@ -59,15 +59,15 @@ export const AppHeader = ({
 
   return (
     <header className="border-b bg-card">
-      <div className="flex items-center justify-between gap-6 px-8 py-3.5">
-        <div className="flex items-center gap-3.5">
-          <VantageLogo className="h-8 w-8 shrink-0" />
+      <div className="flex items-center justify-between gap-6 px-8 py-2">
+        <div className="flex items-center gap-3">
+          <VantageLogo className="h-7 w-7 shrink-0" />
           <div className="relative" ref={switcherRef}>
             <button
               type="button"
               onClick={() => setSwitcherOpen((v) => !v)}
               className={cn(
-                'group flex items-center gap-2 -ml-1 px-1.5 py-1 rounded-md text-left',
+                'group flex items-center gap-2 -ml-1 px-1.5 py-0.5 rounded-md text-left',
                 'hover:bg-muted transition-colors',
                 switcherOpen && 'bg-muted',
               )}
@@ -76,10 +76,10 @@ export const AppHeader = ({
               aria-expanded={switcherOpen}
             >
               <div className="min-w-0">
-                <div className="font-serif text-lg font-semibold leading-tight tracking-tight truncate">
+                <div className="font-serif text-base font-semibold leading-tight tracking-tight truncate">
                   {activeLabel}
                 </div>
-                <div className="font-mono text-[11px] text-muted-foreground mt-0.5 truncate">
+                <div className="font-mono text-[10px] leading-tight text-muted-foreground truncate">
                   {system.hostname} · {system.os} · {system.kernel.replace('Linux ', '')}
                 </div>
               </div>
