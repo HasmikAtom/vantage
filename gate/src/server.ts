@@ -14,6 +14,7 @@ import {
   updateServer,
 } from './registry.js';
 import { createPinStore, validatePins } from './pins.js';
+import { targetResolver } from './targetIp.js';
 import {
   ensureAuditSchema,
   startAuditRetention,
@@ -512,19 +513,18 @@ viewerApi.all('/servers/:id/*', async (c) => {
   }
 
   // We connect by IP rather than by hostname so DNS rebinding can't
-  // redirect us to a private address. The IP was captured at registration
-  // time. If for some reason it's missing (legacy row predating this
-  // column) OR it now lands in a blocked range, refuse — fail closed.
-  let pinnedIp = target.resolvedIp;
-  if (!pinnedIp) {
-    try {
-      const v = await validateAndResolve(target.url);
-      pinnedIp = v.ip;
-    } catch (err) {
-      return c.json({ error: `legacy server failed re-validation: ${(err as Error).message}` }, 502);
-    }
-  } else if (isBlockedIP(pinnedIp)) {
-    return c.json({ error: `server's pinned IP ${pinnedIp} is now in a blocked range` }, 502);
+  // redirect us to a private address. The hostname is looked up again
+  // (cached for a minute) and every answer passes the SSRF check, so an
+  // outpost whose address changed is still reached — and requests never go
+  // to whatever machine now holds its old address. A changed address is
+  // saved on the row.
+  let pinnedIp: string;
+  try {
+    pinnedIp = await targetResolver.currentIp(target.url, target.resolvedIp, (ip) => {
+      updateServer(user.id, id, { resolvedIp: ip });
+    });
+  } catch (err) {
+    return c.json({ error: `outpost address failed validation: ${(err as Error).message}` }, 502);
   }
 
   // The tail is whatever follows /api/servers/<id>; the outpost expects it

@@ -32,7 +32,8 @@ import { randomBytes } from 'node:crypto';
 import type { Context } from 'hono';
 import { getServerToken } from './registry.js';
 import { snapshotFor, snapshotOf } from './transferSnapshot.js';
-import { assertSafeURL, isBlockedIP, resolveHostnamesToIPs, validateAndResolve } from './net-policy.js';
+import { targetResolver } from './targetIp.js';
+import { assertSafeURL, isBlockedIP, resolveHostnamesToIPs } from './net-policy.js';
 
 export type TransferMode = 'move' | 'copy';
 
@@ -182,12 +183,8 @@ async function pinnedIpFor(
   } catch {
     return null;
   }
-  if (target.resolvedIp) {
-    return isBlockedIP(target.resolvedIp) ? null : target.resolvedIp;
-  }
   try {
-    const v = await validateAndResolve(target.url);
-    return v.ip;
+    return await targetResolver.currentIp(target.url, target.resolvedIp);
   } catch {
     return null;
   }
