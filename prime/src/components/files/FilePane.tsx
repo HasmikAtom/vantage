@@ -342,23 +342,25 @@ export function FilePane(p: FilePaneProps) {
         dropTarget={dnd.dropTarget}
         serverPicker={serverPicker}
         refreshTitle={p.split ? 'Refresh (Ctrl+Shift+R)' : 'Refresh (F5)'}
-      />
-      <Toolbar
-        canControl={p.canControl}
-        query={query}
-        onQuery={setQuery}
-        showHidden={p.showHidden}
-        onShowHidden={p.onShowHidden}
-        onNew={(what) => cmd({ type: 'newItem', what })}
-        onUploadFiles={() => cmd({ type: 'upload', folder: false })}
-        onUploadFolder={() => cmd({ type: 'upload', folder: true })}
-        split={p.split}
-        canSplit={p.canSplit}
-        onToggleSplit={() => cmd({ type: 'toggleSplit' })}
-        onHelp={() => cmd({ type: 'help' })}
-      />
+      >
+        <Toolbar
+          canControl={p.canControl}
+          query={query}
+          onQuery={setQuery}
+          showHidden={p.showHidden}
+          onShowHidden={p.onShowHidden}
+          onNew={(what) => cmd({ type: 'newItem', what })}
+          onUploadFiles={() => cmd({ type: 'upload', folder: false })}
+          onUploadFolder={() => cmd({ type: 'upload', folder: true })}
+          split={p.split}
+          canSplit={p.canSplit}
+          onToggleSplit={() => cmd({ type: 'toggleSplit' })}
+          onHelp={() => cmd({ type: 'help' })}
+        />
+      </AddressBar>
       {p.tip}
       <FileList
+        compact={p.split}
         entries={visible}
         emptyText={emptyText({ query, canControl: p.canControl })}
         showParent={nav.path !== '/'}

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { cn } from '@/lib/utils';
 import { Button, Input } from '@/components/ui/primitives';
 import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
 import { ColumnsIcon, FileTextIcon, FolderIcon, UploadIcon } from '@/components/ui/icons';
@@ -28,7 +29,9 @@ export function Toolbar(p: ToolbarProps) {
   const why = p.canControl ? {} : { title: 'Operator role required' };
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b px-2 py-1.5">
+    // Rendered inside the address bar's row (see AddressBar children).
+    // In a split pane it takes its own line under the path.
+    <div className={cn('flex min-w-0 items-center gap-1.5', p.split && 'w-full')}>
       <Button
         size="xs"
         variant="outline"
@@ -57,7 +60,7 @@ export function Toolbar(p: ToolbarProps) {
       >
         <UploadIcon size={11} /> Upload ▾
       </Button>
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex min-w-0 items-center gap-2">
         {(p.canSplit || p.split) && (
           <Button
             size="xs"
@@ -83,9 +86,9 @@ export function Toolbar(p: ToolbarProps) {
               p.onQuery('');
             }
           }}
-          className="h-7 w-44 text-xs"
+          className="h-7 w-36 min-w-[5rem] shrink text-xs"
         />
-        <label className="flex cursor-pointer items-center gap-1 text-[10px] text-muted-foreground">
+        <label className="flex cursor-pointer items-center gap-1 whitespace-nowrap text-[10px] text-muted-foreground">
           <input
             type="checkbox"
             checked={p.showHidden}

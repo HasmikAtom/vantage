@@ -5,7 +5,6 @@ import { useCan } from '@/auth';
 import { cn } from '@/lib/utils';
 import { Card } from '@/components/ui/primitives';
 import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
-import { SectionHeader } from '@/components/SectionHeader';
 import { FilePane, type PaneCommand, type PaneId } from './FilePane';
 import { Sidebar } from './Sidebar';
 import { useSidebarWidth } from './hooks/useSidebarWidth';
@@ -544,7 +543,6 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
 
   return (
     <div className="space-y-3">
-      <SectionHeader label="Files" count={split ? 'split view' : undefined} />
 
       {banner && (
         <div className="flex items-start justify-between gap-2 rounded border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">

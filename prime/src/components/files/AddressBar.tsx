@@ -20,6 +20,8 @@ interface AddressBarProps {
   // Split view: the pane's server picker, rendered at the start of the bar.
   serverPicker?: React.ReactNode;
   refreshTitle?: string;
+  // Toolbar controls sharing this row (they wrap below when the pane is narrow).
+  children?: React.ReactNode;
   dropPropsFor?: (dir: string) => ElProps;
   dropTarget?: string | null;
 }
@@ -40,6 +42,12 @@ export function AddressBar(p: AddressBarProps) {
   const [busy, setBusy] = React.useState(false);
   const pathRef = React.useRef(p.path);
   pathRef.current = p.path;
+  // A path too long for the bar shows its end (where you are), not its start.
+  const crumbsRef = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const el = crumbsRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  });
 
   const startEdit = React.useCallback(() => {
     setText(pathRef.current);
@@ -65,7 +73,7 @@ export function AddressBar(p: AddressBarProps) {
   };
 
   return (
-    <div className="flex items-center gap-1 border-b bg-muted/30 px-2 py-1.5">
+    <div className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b bg-muted/30 px-2 py-1.5">
       {p.serverPicker}
       {p.onToggleSidebar && (
         <Button size="xs" variant="ghost" className="md:hidden" onClick={p.onToggleSidebar} title="Folders">
@@ -81,7 +89,7 @@ export function AddressBar(p: AddressBarProps) {
       <Button size="xs" variant="ghost" disabled={p.path === '/'} onClick={p.onUp} title="Up (Backspace)">
         <ArrowUpIcon size={12} />
       </Button>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[16rem] flex-1 basis-64">
         {editing ? (
           <div>
             <Input
@@ -116,7 +124,8 @@ export function AddressBar(p: AddressBarProps) {
           </div>
         ) : (
           <div
-            className="flex h-7 min-w-0 cursor-text items-center overflow-hidden rounded border border-transparent px-1 font-mono text-xs hover:border-border"
+            ref={crumbsRef}
+            className="flex h-7 min-w-0 cursor-text items-center overflow-hidden rounded border border-primary/40 px-1 font-mono text-xs hover:border-border"
             onClick={(e) => {
               if (e.target === e.currentTarget) startEdit();
             }}
@@ -124,13 +133,13 @@ export function AddressBar(p: AddressBarProps) {
           >
             {ancestorsOf(p.path).map((dir, i, all) => (
               <React.Fragment key={dir}>
-                {i > 1 && <span className="px-0.5 text-muted-foreground/50">/</span>}
+                {i > 1 && <span className="shrink-0 px-0.5 text-muted-foreground/50">/</span>}
                 <button
                   type="button"
                   {...(p.dropPropsFor?.(dir) ?? {})}
                   onClick={() => p.onNavigate(dir)}
                   className={cn(
-                    'truncate rounded px-1 hover:bg-muted',
+                    'shrink-0 whitespace-nowrap rounded px-1 hover:bg-muted',
                     i === all.length - 1 && 'font-semibold',
                     p.dropTarget === dir && 'bg-primary/10 ring-1 ring-primary',
                   )}
@@ -145,6 +154,7 @@ export function AddressBar(p: AddressBarProps) {
       <Button size="xs" variant="ghost" onClick={p.onRefresh} title={p.refreshTitle ?? 'Refresh (F5)'}>
         <RefreshIcon size={11} />
       </Button>
+      {p.children}
     </div>
   );
 }

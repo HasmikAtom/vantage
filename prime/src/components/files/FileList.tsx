@@ -34,7 +34,11 @@ export interface FileListProps {
   dropTarget?: string | null;
   currentDir?: string;
   emptyText?: string;
+  // Narrow pane (split view): drop the Owner and Mode columns.
+  compact?: boolean;
 }
+
+const NARROW_HIDDEN: ReadonlySet<SortKey> = new Set<SortKey>(['owner', 'mode']);
 
 const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: 'name', label: 'Name' },
@@ -83,15 +87,16 @@ export function FileList(p: FileListProps) {
         p.onContextMenu(e, null);
       }}
     >
+      {/* Compact rows: 32 px instead of the shared table's 41 px. */}
       {p.error ?? (
-        <Table>
+        <Table className="[&_td]:py-1.5 [&_th]:h-8">
           <TableHeader>
             <TableRow>
               <TableHead className="w-7 pr-0">
                 <HeaderCheckbox checked={all} indeterminate={selCount > 0 && !all} onChange={p.onToggleAll} />
               </TableHead>
               <TableHead className="w-6 pr-0" />
-              {COLUMNS.map((c) => (
+              {COLUMNS.filter((c) => !p.compact || !NARROW_HIDDEN.has(c.key)).map((c) => (
                 <TableHead
                   key={c.key}
                   className={cn('cursor-pointer select-none', c.className)}
@@ -112,12 +117,12 @@ export function FileList(p: FileListProps) {
                 <TableCell />
                 <TableCell className="pr-0 text-muted-foreground/60">↩</TableCell>
                 <TableCell className="font-mono text-xs">..</TableCell>
-                <TableCell colSpan={4} className="text-xs text-muted-foreground/60">parent folder</TableCell>
+                <TableCell colSpan={p.compact ? 2 : 4} className="text-xs text-muted-foreground/60">parent folder</TableCell>
               </TableRow>
             )}
             {p.entries.length === 0 && !p.loading && (
               <TableRow>
-                <TableCell colSpan={7} className="text-xs text-muted-foreground">{p.emptyText ?? 'empty'}</TableCell>
+                <TableCell colSpan={p.compact ? 5 : 7} className="text-xs text-muted-foreground">{p.emptyText ?? 'empty'}</TableCell>
               </TableRow>
             )}
             {p.entries.map((e) => (
@@ -174,7 +179,7 @@ function Row({ entry: e, p }: { entry: FsEntry; p: FileListProps }) {
         {e.type === 'symlink' && e.target && <span className="ml-1.5 text-muted-foreground/60">→ {e.target}</span>}
         {e.broken && <Badge variant="danger" className="ml-1.5 rounded-sm">broken</Badge>}
       </TableCell>
-      <TableCell className="text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+      <TableCell className="whitespace-nowrap text-right font-mono text-[11px] tabular-nums text-muted-foreground">
         {e.type !== 'dir' ? (
           formatBytes(e.size)
         ) : size?.state === 'pending' ? (
@@ -183,13 +188,17 @@ function Row({ entry: e, p }: { entry: FsEntry; p: FileListProps }) {
           formatDirSize(size)
         )}
       </TableCell>
-      <TableCell className="font-mono text-[11px] text-muted-foreground">{formatMtime(e.mtime)}</TableCell>
-      <TableCell className="font-mono text-[11px] text-muted-foreground">
-        {e.owner}
-        <span className="text-muted-foreground/40">:</span>
-        {e.group}
-      </TableCell>
-      <TableCell className="font-mono text-[10px] text-muted-foreground">{e.modeStr}</TableCell>
+      <TableCell className="whitespace-nowrap font-mono text-[11px] text-muted-foreground">{formatMtime(e.mtime)}</TableCell>
+      {!p.compact && (
+        <>
+          <TableCell className="whitespace-nowrap font-mono text-[11px] text-muted-foreground">
+            {e.owner}
+            <span className="text-muted-foreground/40">:</span>
+            {e.group}
+          </TableCell>
+          <TableCell className="whitespace-nowrap font-mono text-[10px] text-muted-foreground">{e.modeStr}</TableCell>
+        </>
+      )}
     </TableRow>
   );
 }
