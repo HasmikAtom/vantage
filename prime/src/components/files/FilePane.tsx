@@ -352,11 +352,15 @@ export function FilePane(p: FilePaneProps) {
       onMouseDownCapture={p.onActivate}
       onFocusCapture={p.onActivate}
       className={cn(
-        'flex min-h-0 min-w-0 flex-1 flex-col outline-none',
+        'relative flex min-h-0 min-w-0 flex-1 flex-col outline-none',
         p.split && p.paneId === 'right' && 'border-l',
-        p.split && p.active && 'ring-1 ring-inset ring-primary',
       )}
     >
+      {/* Active-pane outline, drawn above the pane's contents so the sticky
+          column headers (opaque, z-10) can't cover it. */}
+      {p.split && p.active && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-20 ring-1 ring-inset ring-primary" />
+      )}
       <AddressBar
         path={nav.path}
         canBack={nav.canBack}

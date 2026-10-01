@@ -638,7 +638,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
                 />
                 {/* Fold button: centred on the sidebar's edge, level with the path bar. */}
                 <div className="relative hidden w-0 shrink-0 md:block">
-                  <div className="absolute left-0 top-2.5 z-20 -translate-x-1/2">
+                  <div className="absolute left-0 top-2.5 z-30 -translate-x-1/2">
                     <FoldButton folded={false} onClick={() => setSidebarFolded(true)} />
                   </div>
                 </div>
