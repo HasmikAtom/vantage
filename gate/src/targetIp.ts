@@ -60,7 +60,15 @@ export function createTargetResolver(o: TargetResolverOptions = {}): TargetResol
       const hit = cache.get(url);
       const answer = hit && now() - hit.at <= ttl ? hit : await lookup(url);
       const ip = savedIp !== null && answer.ips.includes(savedIp) ? savedIp : answer.ip;
-      if (ip !== savedIp) onChange?.(ip);
+      if (ip !== savedIp) {
+        // Saving is best-effort: the address passed validation, so a storage
+        // error must not fail the request; the next lookup tries again.
+        try {
+          onChange?.(ip);
+        } catch (e) {
+          console.warn(`[gate] could not save the new outpost address ${ip}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
       return ip;
     },
   };

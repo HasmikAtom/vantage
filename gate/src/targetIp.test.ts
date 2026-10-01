@@ -101,3 +101,13 @@ test('keeps the saved address while it is still one of the answers', async () =>
   assert.equal(ip, '10.0.0.2');
   assert.deepEqual(changed, []);
 });
+
+test('a failure saving the new address does not fail the request', async () => {
+  // Persisting is best-effort (e.g. SQLITE_BUSY); the address itself passed
+  // validation, so the request goes ahead and the save is retried next time.
+  const { resolver } = setup(['10.0.7.4']);
+  const ip = await resolver.currentIp('http://outpost:8080', '10.0.7.3', () => {
+    throw new Error('SQLITE_BUSY');
+  });
+  assert.equal(ip, '10.0.7.4');
+});
