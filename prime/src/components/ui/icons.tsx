@@ -46,6 +46,7 @@ export const MoonIcon = (p: IconProps) => (
 );
 
 export const ChevronRightIcon = (p: IconProps) => <Icon {...p} d="m9 18 6-6-6-6" />;
+export const ChevronLeftIcon = (p: IconProps) => <Icon {...p} d="m15 18-6-6 6-6" />;
 
 export const SearchIcon = (p: IconProps) => (
   <Icon

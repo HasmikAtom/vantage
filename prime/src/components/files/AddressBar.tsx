@@ -91,11 +91,13 @@ export function AddressBar(p: AddressBarProps) {
       </Button>
       <div className="min-w-[16rem] flex-1 basis-64">
         {editing ? (
-          <div>
+          <div className="relative">
             <Input
               autoFocus
               value={text}
-              disabled={busy}
+              // Read-only (not disabled) while checking, so focus stays and a
+              // wrong path can be corrected or dismissed with Esc right away.
+              readOnly={busy}
               onChange={(e) => {
                 setText(e.target.value);
                 setErr(null);
@@ -118,9 +120,16 @@ export function AddressBar(p: AddressBarProps) {
                 }
               }}
               aria-invalid={err ? true : undefined}
-              className={cn('h-7 font-mono text-xs', err && 'border-destructive')}
+              // Same box as the breadcrumbs (the shared Input is taller and
+              // wider-padded), so focusing the bar doesn't resize the row.
+              className={cn('!h-7 !rounded !px-1 !py-0 font-mono !text-xs', err && 'border-destructive')}
             />
-            {err && <div className="mt-0.5 text-[10px] text-destructive">{err}</div>}
+            {/* Floats under the box instead of pushing the row taller. */}
+            {err && (
+              <div className="absolute left-0 top-full z-20 mt-0.5 rounded border bg-popover px-1.5 py-0.5 text-[10px] text-destructive shadow">
+                {err}
+              </div>
+            )}
           </div>
         ) : (
           <div

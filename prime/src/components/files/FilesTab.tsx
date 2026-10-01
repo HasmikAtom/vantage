@@ -5,9 +5,11 @@ import { useCan } from '@/auth';
 import { cn } from '@/lib/utils';
 import { Card } from '@/components/ui/primitives';
 import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
+import { ChevronLeftIcon, ChevronRightIcon } from '@/components/ui/icons';
 import { FilePane, type PaneCommand, type PaneId } from './FilePane';
 import { Sidebar } from './Sidebar';
 import { useSidebarWidth } from './hooks/useSidebarWidth';
+import { useStoredFlag } from './hooks/useStoredFlag';
 import { useFillHeight } from './hooks/useFillHeight';
 import { usePaneRatio } from './hooks/usePaneRatio';
 import { EDITOR_MAX_BYTES, ROOT } from './fsPath';
@@ -168,6 +170,9 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
   const clipboard = useClipboard();
   const { pins, save: savePins, error: pinsError } = usePins(activeServer);
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  // Desktop: the sidebar can be folded away entirely (phones use the
+  // slide-over instead).
+  const [sidebarFolded, setSidebarFolded] = useStoredFlag('vantage.files.sidebarFolded');
   const bodyRef = React.useRef<HTMLDivElement>(null);
   const sidebar = useSidebarWidth(bodyRef, split);
   // The card fills the rest of the window (12 px = the page's padding on
@@ -589,8 +594,13 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
               className={cn(
                 'w-56 shrink-0 overflow-hidden border-r bg-muted/10 md:w-[var(--files-sidebar-w)]',
                 sidebarOpen
-                  ? 'fixed inset-y-0 left-0 z-40 block w-64 bg-background shadow-xl md:static md:z-auto md:bg-muted/10 md:shadow-none'
-                  : 'hidden md:block',
+                  ? cn(
+                      'fixed inset-y-0 left-0 z-40 block w-64 bg-background shadow-xl md:static md:z-auto md:bg-muted/10 md:shadow-none',
+                      sidebarFolded && 'md:hidden',
+                    )
+                  : sidebarFolded
+                    ? 'hidden'
+                    : 'hidden md:block',
               )}
             >
               <Sidebar
@@ -611,14 +621,29 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
               />
             </aside>
             {/* Resize handle: sits over the sidebar's border, desktop only. */}
-            <div
-              {...sidebar.handleProps}
-              className={cn(
-                'relative z-10 -ml-[3px] hidden w-[5px] shrink-0 cursor-col-resize touch-none outline-none transition-colors md:block',
-                'hover:bg-primary/30 focus-visible:bg-primary/40',
-                sidebar.dragging && 'bg-primary/50',
-              )}
-            />
+            {sidebarFolded ? (
+              // Folded: a slim strip with the button that brings it back.
+              <div className="hidden w-7 shrink-0 justify-center border-r bg-muted/10 pt-2.5 md:flex">
+                <FoldButton folded onClick={() => setSidebarFolded(false)} />
+              </div>
+            ) : (
+              <>
+                <div
+                  {...sidebar.handleProps}
+                  className={cn(
+                    'relative z-10 -ml-[3px] hidden w-[5px] shrink-0 cursor-col-resize touch-none outline-none transition-colors md:block',
+                    'hover:bg-primary/30 focus-visible:bg-primary/40',
+                    sidebar.dragging && 'bg-primary/50',
+                  )}
+                />
+                {/* Fold button: centred on the sidebar's edge, level with the path bar. */}
+                <div className="relative hidden w-0 shrink-0 md:block">
+                  <div className="absolute left-0 top-2.5 z-20 -translate-x-1/2">
+                    <FoldButton folded={false} onClick={() => setSidebarFolded(true)} />
+                  </div>
+                </div>
+              </>
+            )}
             {split && !wide ? (
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div className="flex border-b text-xs" role="tablist">
@@ -786,5 +811,22 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
         onRefreshSource={refreshAll}
       />
     </div>
+  );
+}
+
+// The little round arrow on the sidebar's edge: ‹ folds it away, › brings it back.
+function FoldButton({ folded, onClick }: { folded: boolean; onClick: () => void }) {
+  const label = folded ? 'Show folders' : 'Hide folders';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-expanded={!folded}
+      className="flex h-5 w-5 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition-colors hover:border-primary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+    >
+      {folded ? <ChevronRightIcon size={11} /> : <ChevronLeftIcon size={11} />}
+    </button>
   );
 }
