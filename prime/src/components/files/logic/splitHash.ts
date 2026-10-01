@@ -33,3 +33,13 @@ export function parseFilesHash(hash: string): FilesHash | null {
   if (!SERVER_ID.test(rightServer) || right === null) return null;
   return { mode: 'split', left, rightServer, right };
 }
+
+// Browser Back/Forward in split view lands on an older single-pane entry
+// (#files:/x). The panes don't follow browser history in split view, so put
+// the split hash back on that entry; another tab's hash is left alone.
+export function restoreSplitHash(hash: string, left: string, rightServer: string, right: string): string | null {
+  const want = splitHashFor(left, rightServer, right);
+  if (hash === want) return null;
+  if (hash !== '#files' && !hash.startsWith(PREFIX)) return null;
+  return want;
+}

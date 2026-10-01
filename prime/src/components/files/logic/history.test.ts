@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canBack, canForward, hashFor, navInit, navPop, navPush, pathFromHash } from './history';
+import { canBack, canForward, hashFor, navInit, navOnEnable, navPop, navPush, pathFromHash } from './history';
 
 describe('hash encoding', () => {
   it.each([
@@ -49,5 +49,17 @@ describe('nav model', () => {
   it('ignores popstate entries that did not come from the explorer', () => {
     const m = { idx: 2, max: 2 };
     expect(navPop(m, undefined)).toBe(m);
+  });
+});
+
+describe('navOnEnable', () => {
+  it('re-reads the explorer position from the current history entry', () => {
+    expect(navOnEnable({ filesIdx: 2 })).toEqual({ idx: 2, max: 2 });
+    expect(navOnEnable({ filesIdx: 0 })).toEqual({ idx: 0, max: 0 });
+  });
+  it('treats foreign or missing state as the first entry', () => {
+    expect(navOnEnable(null)).toEqual({ idx: 0, max: 0 });
+    expect(navOnEnable({ filesIdx: 'x' })).toEqual({ idx: 0, max: 0 });
+    expect(navOnEnable('junk')).toEqual({ idx: 0, max: 0 });
   });
 });

@@ -40,3 +40,11 @@ export function navPop(m: NavModel, stateIdx: unknown): NavModel {
 
 export const canBack = (m: NavModel): boolean => m.idx > 0;
 export const canForward = (m: NavModel): boolean => m.idx < m.max;
+
+// Re-reads where the browser actually is when explorer history handling is
+// switched back on (leaving split view): entries may have been walked with
+// browser Back/Forward while it was off.
+export function navOnEnable(state: unknown): NavModel {
+  const idx = state && typeof state === 'object' ? (state as { filesIdx?: unknown }).filesIdx : undefined;
+  return navInit(idx);
+}
