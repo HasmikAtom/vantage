@@ -39,6 +39,7 @@ export function useNavHistory(opts: { enabled?: boolean; initialPath?: string } 
     // Re-sync with the entry the browser is really on (Back/Forward may
     // have moved it while split view had history handling switched off).
     model.current = navOnEnable(window.history.state);
+    rerender();
     // Stamp the entry we are on so popstate can recognise it.
     window.history.replaceState({ filesIdx: model.current.idx }, '', hashFor(pathRef.current));
     const onPop = (e: PopStateEvent) => {
