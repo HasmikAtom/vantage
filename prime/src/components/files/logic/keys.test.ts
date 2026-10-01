@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shortcutFor, typeAheadChar, type KeyInput } from './keys';
+import { outsideShortcut, shortcutFor, typeAheadChar, type KeyInput } from './keys';
 
 const k = (key: string, mods: Partial<KeyInput> = {}): KeyInput => ({
   key, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...mods,
@@ -109,5 +109,18 @@ describe('shortcutFor — focus and F6', () => {
     expect(shortcutFor(k('F6'), true, false)).toBe('noop');
     expect(shortcutFor(k('F6'), false, true)).toBe('noop');
     expect(shortcutFor(k('F6'), true, true)).toBe('moveOther');
+  });
+});
+
+describe('outsideShortcut (focus outside the panes, e.g. right after clicking the Files tab)', () => {
+  it('handles the harmless view shortcuts', () => {
+    expect(outsideShortcut(k('\\', { ctrlKey: true }))).toBe('toggleSplit');
+    expect(outsideShortcut(k('\\', { metaKey: true }))).toBe('toggleSplit');
+    expect(outsideShortcut(k('?', { shiftKey: true }))).toBe('help');
+  });
+  it('leaves everything else alone, especially anything that changes files', () => {
+    for (const e of [k('Delete'), k('F2'), k('x', { ctrlKey: true }), k('v', { ctrlKey: true }), k('a'), k('ArrowDown'), k('Enter'), k('?', { ctrlKey: true }), k('\\')]) {
+      expect(outsideShortcut(e)).toBeNull();
+    }
   });
 });

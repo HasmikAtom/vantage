@@ -81,3 +81,13 @@ export function typeAheadChar(e: KeyInput): string | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
   return e.key.length === 1 && e.key !== ' ' ? e.key.toLowerCase() : null;
 }
+
+// Shortcuts that also work while focus is outside the panes (e.g. right
+// after clicking the Files tab). Only view toggles: anything that acts on
+// the selection (Delete, F2, Ctrl+X/V…) stays with a focused pane, so a
+// key pressed elsewhere can never change files.
+export function outsideShortcut(e: KeyInput): 'toggleSplit' | 'help' | null {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === '\\') return 'toggleSplit';
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === '?') return 'help';
+  return null;
+}

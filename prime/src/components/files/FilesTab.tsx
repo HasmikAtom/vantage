@@ -11,6 +11,8 @@ import { Sidebar } from './Sidebar';
 import { useSidebarWidth } from './hooks/useSidebarWidth';
 import { useStoredFlag } from './hooks/useStoredFlag';
 import { useFillHeight } from './hooks/useFillHeight';
+import { outsideShortcut } from './logic/keys';
+import { ignoresExplorerKeys } from './keyTarget';
 import { usePaneRatio } from './hooks/usePaneRatio';
 import { EDITOR_MAX_BYTES, ROOT } from './fsPath';
 import { backgroundMenu, itemMenu, type MenuCtx } from './menus';
@@ -480,6 +482,28 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
         break;
     }
   };
+
+  // Ctrl+\ and ? also work while focus is outside the panes (e.g. right
+  // after clicking the Files tab); every other shortcut needs a focused pane.
+  const outsideKey = React.useRef<(e: KeyboardEvent) => void>(() => {});
+  outsideKey.current = (e) => {
+    if (e.defaultPrevented || modal !== null || menu !== null || helpOpen) return;
+    const t = e.target as HTMLElement;
+    if (leftRoot.current?.contains(t) || rightRoot.current?.contains(t)) return; // the pane handles it
+    if (ignoresExplorerKeys(t, e.key)) return;
+    const s = outsideShortcut(e);
+    if (!s) return;
+    e.preventDefault();
+    handleCommand(activePane, { type: s });
+    // Either way the explorer shows a left pane next: put focus there so
+    // arrows, Tab and the other shortcuts work straight away.
+    if (s === 'toggleSplit') requestAnimationFrame(() => leftRoot.current?.focus());
+  };
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => outsideKey.current(e);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const closeMenu = React.useCallback(() => {
     setMenu(null);
