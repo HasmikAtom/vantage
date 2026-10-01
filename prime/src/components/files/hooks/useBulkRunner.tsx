@@ -54,6 +54,8 @@ interface PendingConflict {
 export function useBulkRunner(
   onRetried: () => void,
   onBusy?: () => void,
+  // A "Retry failed" pass that crashes; first passes report through their caller.
+  onError?: (message: string) => void,
 ): {
   runBulk: RunBulk;
   askConflict: AskConflict;
@@ -74,6 +76,8 @@ export function useBulkRunner(
   const shown = React.useRef(false);
   const onBusyRef = React.useRef(onBusy);
   onBusyRef.current = onBusy;
+  const onErrorRef = React.useRef(onError);
+  onErrorRef.current = onError;
   const claim = React.useCallback(() => {
     if (busy.current || !mounted.current) return false;
     busy.current = true;
@@ -206,7 +210,11 @@ export function useBulkRunner(
     const { title, op, states, opts } = view;
     setView(null);
     busy.current = false;
-    await runBulk(`${title} (retry)`, failedItems(states), op, opts);
+    try {
+      await runBulk(`${title} (retry)`, failedItems(states), op, opts);
+    } catch (e) {
+      onErrorRef.current?.(e instanceof Error ? e.message : String(e));
+    }
     onRetried();
   }, [view, runBulk, onRetried]);
 

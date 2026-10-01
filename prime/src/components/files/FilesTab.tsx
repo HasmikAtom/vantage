@@ -253,7 +253,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
 
   const onError = React.useCallback((m: string) => setBanner(m), []);
   const onBusy = React.useCallback(() => setBanner('Finish or close the current operation first.'), []);
-  const { runBulk, askConflict, claim, release, dialogs: bulkDialogs } = useBulkRunner(bump, onBusy);
+  const { runBulk, askConflict, claim, release, dialogs: bulkDialogs } = useBulkRunner(bump, onBusy, onError);
   const leftActions = useFileActions({ serverId, runBulk, afterMutation: leftAfter, onError });
   const rightActions = useFileActions({ serverId: rightServerId, runBulk, afterMutation: rightAfter, onError });
   const actionsOf = (pane: PaneId) => (pane === 'right' ? rightActions : leftActions);

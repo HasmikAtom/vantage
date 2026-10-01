@@ -281,9 +281,15 @@ async function crossRun(
       if (keptCount > 0) {
         notes.push(`${keptCount} ${keptCount === 1 ? 'item was' : 'items were'} kept at the source because not everything was copied`);
       }
-      await d.afterMutation(src.serverId, [...new Set(plan.tops.map((t) => parentOf(t.path)))]);
     }
-    await d.afterMutation(dst.serverId, [dst.dir]);
+    // A failed refresh only means a stale listing; it must not swallow the
+    // clipboard update or this pass's messages.
+    try {
+      if (mode === 'move') await d.afterMutation(src.serverId, [...new Set(plan.tops.map((t) => parentOf(t.path)))]);
+      await d.afterMutation(dst.serverId, [dst.dir]);
+    } catch (e) {
+      notes.push(`Could not refresh the listing: ${msg(e)}`);
+    }
     if (movedNow.length > 0) d.onMoved?.(src.serverId, movedNow);
     flush();
   };

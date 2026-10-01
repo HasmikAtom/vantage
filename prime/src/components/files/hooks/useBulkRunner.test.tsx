@@ -188,3 +188,30 @@ describe('useBulkRunner — clean-up step', () => {
     host.remove();
   });
 });
+
+describe('useBulkRunner — retry', () => {
+  it('reports a crash in a "Retry failed" pass instead of rejecting unseen', async () => {
+    const errors: string[] = [];
+    const api: { r: ReturnType<typeof useBulkRunner> | null } = { r: null };
+    function Probe() {
+      const r = useBulkRunner(() => {}, () => {}, (m) => errors.push(m));
+      api.r = r;
+      return <>{r.dialogs}</>;
+    }
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<Probe />));
+    let pass = 0;
+    await act(async () => {
+      await api.r!.runBulk('x', [{ id: 'a', label: 'a' }], async () => { throw new Error('nope'); }, {
+        onSettled: () => { if (++pass === 2) throw new Error('settle blew up'); },
+      });
+    });
+    const retry = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Retry failed');
+    await act(async () => { retry!.click(); await new Promise((r) => setTimeout(r, 0)); });
+    expect(errors).toEqual(['settle blew up']);
+    act(() => root.unmount());
+    host.remove();
+  });
+});

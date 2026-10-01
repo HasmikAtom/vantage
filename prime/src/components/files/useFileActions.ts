@@ -12,8 +12,8 @@ import {
 } from '@/api';
 import { baseName, copyName, joinPath, parentOf } from './fsPath';
 import { fetchListing } from './hooks/useDirListing';
-import type { RunBulk } from './hooks/useBulkRunner';
-import { isConflict } from './logic/bulk';
+import type { RunBulk, RunBulkOptions } from './hooks/useBulkRunner';
+import { isConflict, type ItemState } from './logic/bulk';
 import { preflightConflict } from './logic/conflicts';
 import { clipboardAfterMove, clipboardStore, planPaste, type FsClipboard } from './logic/clipboard';
 import { canDropInto } from './logic/dnd';
@@ -65,6 +65,7 @@ export function createFileActions(d: FileActionsDeps): FileActions {
     title: string,
     ops: readonly { from: string; to: string; isDir: boolean; mode: 'copy' | 'move' }[],
     targetDir: string,
+    onSettled?: RunBulkOptions['onSettled'],
   ) => {
     const existing = await existingEntries(serverId, targetDir);
     const taken = new Set(existing.keys());
@@ -86,6 +87,7 @@ export function createFileActions(d: FileActionsDeps): FileActions {
         if (o.mode === 'copy') await fsCopy(serverId, o.from, to, { overwrite: opts.overwrite, recursive: o.isDir });
         else await fsMove(serverId, o.from, to, { overwrite: opts.overwrite });
       },
+      onSettled ? { onSettled } : {},
     );
     await afterMutation([targetDir, ...new Set(ops.map((o) => parentOf(o.from)))]);
     return states;
@@ -121,15 +123,19 @@ export function createFileActions(d: FileActionsDeps): FileActions {
       // shell before reaching here.
       if (plan.kind === 'transfer') return;
       if (plan.ops.length === 0) return;
-      const states = await localOps(
+      // Only what really moved leaves the clipboard: a refused, cancelled or
+      // partly failed paste can be tried again. onSettled also runs after a
+      // "Retry failed" pass, which doesn't go through paste().
+      const dropMoved = (states: readonly ItemState[]) => {
+        const moved = states.filter((st) => st.status === 'done').map((st) => st.item.id);
+        clipboardStore.set(clipboardAfterMove(clipboardStore.get(), serverId, moved));
+      };
+      await localOps(
         `${clip.mode === 'cut' ? 'Moving' : 'Copying'} ${plural(plan.ops.length, 'item')}`,
         plan.ops,
         targetDir,
+        dropMoved,
       );
-      // Only what really moved leaves the clipboard: a refused, cancelled or
-      // partly failed paste can be tried again.
-      const moved = states.filter((st) => st.status === 'done').map((st) => st.item.id);
-      clipboardStore.set(clipboardAfterMove(clipboardStore.get(), serverId, moved));
     },
 
     async upload(plan, targetDir) {

@@ -29,8 +29,12 @@ const cut: FsClipboard = {
 };
 
 function actions(statusFor: (id: string) => ItemState['status']) {
-  const runBulk: RunBulk = async (_title, items) =>
-    items.map((item): ItemState => ({ item, status: statusFor(item.id), error: null }));
+  const runBulk: RunBulk = async (_title, items, _op, opts) => {
+    const states = items.map((item): ItemState => ({ item, status: statusFor(item.id), error: null }));
+    // Like the real runner: a refused run (all cancelled) never settles.
+    if (!states.every((st) => st.status === 'cancelled')) await opts?.onSettled?.(states);
+    return states;
+  };
   return createFileActions({ serverId: 's1', runBulk, afterMutation: async () => {}, onError: () => {} });
 }
 
@@ -45,6 +49,23 @@ describe('paste of a cut', () => {
   it('drops only the items that moved', async () => {
     await actions((id) => (id === '/a/one.txt' ? 'done' : 'failed')).paste(cut, '/b');
     expect(clipboardStore.get()?.items.map((i) => i.path)).toEqual(['/a/two.txt']);
+  });
+
+  it('drops items that a "Retry failed" pass moves', async () => {
+    // The retry runs through the bulk runner, not paste(), so the clipboard
+    // update has to happen in onSettled, which runs after every pass.
+    let settled: ((states: ItemState[]) => void | Promise<void>) | undefined;
+    const runBulk: RunBulk = async (_t, items, _op, opts) => {
+      settled = opts?.onSettled;
+      const states = items.map((item): ItemState => ({ item, status: item.id === '/a/one.txt' ? 'done' : 'failed', error: null }));
+      await opts?.onSettled?.(states);
+      return states;
+    };
+    const a = createFileActions({ serverId: 's1', runBulk, afterMutation: async () => {}, onError: () => {} });
+    await a.paste(cut, '/b');
+    expect(clipboardStore.get()?.items.map((i) => i.path)).toEqual(['/a/two.txt']);
+    await settled!([{ item: { id: '/a/two.txt', label: 'two.txt' }, status: 'done', error: null }]);
+    expect(clipboardStore.get()).toBeNull();
   });
 
   it('clears the clipboard when everything moved', async () => {

@@ -456,3 +456,18 @@ describe('runCrossTransfer — third review', () => {
     expect(released).toBe(1);
   });
 });
+
+describe('runCrossTransfer — review of 1.3.1', () => {
+  it('still reports moved sources and messages when refreshing a listing fails', async () => {
+    const moved: string[] = [];
+    const { d, calls } = setup({
+      over: {
+        afterMutation: async () => { throw new Error('listing down'); },
+        onMoved: (_s, paths) => moved.push(...paths),
+      },
+    });
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(moved).toEqual([logs.path]);
+    expect(calls.errors.join(' ')).toMatch(/listing down/);
+  });
+});
