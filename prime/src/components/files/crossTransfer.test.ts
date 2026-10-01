@@ -218,3 +218,70 @@ describe('runCrossTransfer — review fixes', () => {
     expect(statuses[statuses.length - 1]).toBe(null);
   });
 });
+
+describe('runCrossTransfer — minor fixes', () => {
+  it('names the destination in the large-copy prompt', async () => {
+    let asked = '';
+    const { d } = setup({ over: { confirm: (m) => { asked = m; return false; } } });
+    await runCrossTransfer(d, { serverId: A, items: [{ path: '/src/many', isDir: true, size: 0 }] }, { serverId: B, dir: '/dst', label: 'dev-b:/dst' }, 'copy');
+    expect(asked).toBe('Copy 1,001 files (1001 B) to dev-b:/dst?');
+  });
+
+  it('returns the sources that were actually moved', async () => {
+    const { d } = setup({ failSrc: '/src/logs/old/b.log' });
+    const moved = await runCrossTransfer(
+      d,
+      { serverId: A, items: [logs, { path: '/src/f.txt', isDir: false, size: 3, type: 'file' }] },
+      { serverId: B, dir: '/dst' },
+      'move',
+    );
+    expect(moved).toEqual(['/src/f.txt']);
+  });
+
+  it('stops with a message when the destination folder cannot be read', async () => {
+    const { d, calls } = setup();
+    d.api.existing = async () => { throw new Error('permission denied'); };
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(calls.transfers).toEqual([]);
+    expect(calls.mkdir).toEqual([]);
+    expect(calls.errors[0]).toMatch(/Could not read the destination folder: permission denied/);
+  });
+
+  it('Cancel during the copy cancels running transfers and keeps the sources', async () => {
+    const cancelled: string[] = [];
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const cancellingRunBulk: RunBulk = async (_title, items, op, opts) => {
+      const run = new BulkRun(items, op, noConflict, opts?.concurrency ?? 4);
+      const done = run.start();
+      await new Promise((r) => setTimeout(r, 10));
+      run.cancel();
+      opts?.onCancel?.();
+      release();
+      const states = await done;
+      await opts?.onSettled?.(states);
+      return states;
+    };
+    const { d, calls } = setup({ over: { runBulk: cancellingRunBulk } });
+    d.api.awaitTransfer = async () => {
+      await hold;
+      throw new Error('cancelled');
+    };
+    d.api.cancelTransfer = async (id) => { cancelled.push(id); };
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(cancelled.length).toBeGreaterThan(0);
+    expect(calls.trash).toEqual([]);
+  });
+
+  it('a folder that cannot be created part-way keeps its source on a move', async () => {
+    const { d, calls } = setup();
+    d.api.mkdir = async (_s, p) => {
+      if (p === '/dst/logs/old') throw new Error('no space');
+      calls.mkdir.push(p);
+    };
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.transfers).toEqual([]);
+    expect(calls.trash).toEqual([]);
+    expect(calls.errors[0]).toMatch(/Could not create logs on the destination: no space/);
+  });
+});

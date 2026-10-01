@@ -34,12 +34,8 @@ export interface CrossApi {
 export const defaultCrossApi: CrossApi = {
   list: async (serverId, path) => (await fsList(serverId, path)).entries,
   existing: async (serverId, dir) => {
-    try {
-      const l = await fetchListing(serverId, dir, true);
-      return new Map(l.entries.map((e) => [e.name, e.type]));
-    } catch {
-      return new Map();
-    }
+    const l = await fetchListing(serverId, dir, true);
+    return new Map(l.entries.map((e) => [e.name, e.type]));
   },
   mkdir: (serverId, path) => fsMkdir(serverId, path),
   startTransfer: async (req) => (await createTransfer({ ...req, mode: 'copy' })).id,
@@ -57,6 +53,9 @@ export interface CrossDeps {
   onError(message: string): void;
   // Progress while source folders are scanned; null when scanning is over.
   onStatus?: (message: string | null) => void;
+  // Sources that were moved (copied and then trashed at the source),
+  // reported after each pass including retries.
+  onMoved?: (serverId: string, paths: string[]) => void;
   afterMutation(serverId: string, dirs: readonly string[]): Promise<void>;
 }
 
@@ -77,16 +76,16 @@ let active = false;
 export async function runCrossTransfer(
   d: CrossDeps,
   src: { serverId: string; items: readonly CrossSource[] },
-  dst: { serverId: string; dir: string },
+  dst: { serverId: string; dir: string; label?: string },
   mode: 'copy' | 'move',
-): Promise<void> {
+): Promise<string[]> {
   if (active) {
     d.onError('Another cross-server copy is already running — wait for it to finish.');
-    return;
+    return [];
   }
   active = true;
   try {
-    await crossRun(d, src, dst, mode);
+    return await crossRun(d, src, dst, mode);
   } finally {
     active = false;
     d.onStatus?.(null);
@@ -96,9 +95,9 @@ export async function runCrossTransfer(
 async function crossRun(
   d: CrossDeps,
   src: { serverId: string; items: readonly CrossSource[] },
-  dst: { serverId: string; dir: string },
+  dst: { serverId: string; dir: string; label?: string },
   mode: 'copy' | 'move',
-): Promise<void> {
+): Promise<string[]> {
   const verb = mode === 'copy' ? 'Copy' : 'Move';
   const notes: string[] = [];
   const flush = () => {
@@ -117,18 +116,25 @@ async function crossRun(
     );
   } catch (e) {
     d.onError(e instanceof TooManyFilesError ? e.message : `Could not read the source folders: ${msg(e)}`);
-    return;
+    return [];
   }
   d.onStatus?.(null);
   if (
     plan.files.length > CROSS_CONFIRM_FILES &&
-    !d.confirm(`${verb} ${plan.files.length.toLocaleString('en-US')} files (${formatBytes(plan.totalBytes)}) to another server?`)
+    !d.confirm(`${verb} ${plan.files.length.toLocaleString('en-US')} files (${formatBytes(plan.totalBytes)}) to ${dst.label ?? 'another server'}?`)
   ) {
-    return;
+    return [];
   }
 
-  // Top-level name conflicts at the destination.
-  const existing = await d.api.existing(dst.serverId, dst.dir);
+  // Top-level name conflicts at the destination. If the destination can't
+  // be listed, stop: copying blind would merge into folders unasked.
+  let existing: Map<string, FsEntryType>;
+  try {
+    existing = await d.api.existing(dst.serverId, dst.dir);
+  } catch (e) {
+    d.onError(`Could not read the destination folder: ${msg(e)}`);
+    return [];
+  }
   const taken = new Set(existing.keys());
   const target = new Map<string, { name: string; overwrite: boolean }>();
   const kept = new Set<string>();
@@ -145,7 +151,7 @@ async function crossRun(
       const a = await d.askConflict({ id: t.path, label: t.name });
       if (a.cancelled) {
         d.onError(`${verb} cancelled — nothing was changed.`);
-        return;
+        return [];
       }
       choice = a.choice;
       if (a.applyToAll) sticky = a.choice;
@@ -190,12 +196,14 @@ async function crossRun(
         `${plan.skipped.length} link(s) or special file(s) skipped: ${plan.skipped.slice(0, 3).map(baseName).join(', ')}${plan.skipped.length > 3 ? '…' : ''}`,
       );
     }
+    const movedNow: string[] = [];
     if (mode === 'move') {
       for (const p of topsToDelete(plan, done, kept)) {
         if (trashed.has(p)) continue;
         try {
           await d.api.trash(src.serverId, p);
           trashed.add(p);
+          movedNow.push(p);
         } catch (e) {
           notes.push(`Copied, but could not remove ${baseName(p)} from the source: ${msg(e)}`);
         }
@@ -207,6 +215,7 @@ async function crossRun(
       await d.afterMutation(src.serverId, [...new Set(plan.tops.map((t) => parentOf(t.path)))]);
     }
     await d.afterMutation(dst.serverId, [dst.dir]);
+    if (movedNow.length > 0) d.onMoved?.(src.serverId, movedNow);
     flush();
   };
 
@@ -244,4 +253,5 @@ async function crossRun(
       onSettled: settle,
     },
   );
+  return [...trashed];
 }

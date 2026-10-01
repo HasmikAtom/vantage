@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clipboardStore, planPaste, type FsClipboard } from './clipboard';
+import { clipboardAfterMove, clipboardStore, planPaste, type FsClipboard } from './clipboard';
 
 const clip = (mode: 'copy' | 'cut', serverId = 's1'): FsClipboard => ({
   serverId,
@@ -65,5 +65,29 @@ describe('clipboardStore', () => {
     clipboardStore.set(null);
     expect(calls).toBe(1);
     expect(clipboardStore.get()).toBe(null);
+  });
+});
+
+describe('clipboardAfterMove', () => {
+  const cut = (serverId = 'a'): FsClipboard => ({
+    serverId,
+    mode: 'cut',
+    items: [
+      { path: '/x/1', isDir: false, size: 1 },
+      { path: '/x/2', isDir: false, size: 1 },
+    ],
+  });
+  it('drops only the items that moved', () => {
+    expect(clipboardAfterMove(cut(), 'a', ['/x/1'])?.items.map((i) => i.path)).toEqual(['/x/2']);
+  });
+  it('empties the clipboard once everything moved', () => {
+    expect(clipboardAfterMove(cut(), 'a', ['/x/1', '/x/2'])).toBe(null);
+  });
+  it('leaves copies, other servers and an empty clipboard alone', () => {
+    const copy: FsClipboard = { ...cut(), mode: 'copy' };
+    expect(clipboardAfterMove(copy, 'a', ['/x/1'])).toBe(copy);
+    const other = cut('b');
+    expect(clipboardAfterMove(other, 'a', ['/x/1'])).toBe(other);
+    expect(clipboardAfterMove(null, 'a', ['/x/1'])).toBe(null);
   });
 });

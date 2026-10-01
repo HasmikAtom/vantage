@@ -74,6 +74,19 @@ export function planPaste(
   return { kind: 'local', ops, refused };
 }
 
+// After a cut was pasted onto another server: drop the items that really
+// moved, keep the rest so they can be pasted again.
+export function clipboardAfterMove(
+  c: FsClipboard | null,
+  serverId: string,
+  moved: readonly string[],
+): FsClipboard | null {
+  if (!c || c.mode !== 'cut' || c.serverId !== serverId) return c;
+  const gone = new Set(moved);
+  const left = c.items.filter((i) => !gone.has(i.path));
+  return left.length > 0 ? { ...c, items: left } : null;
+}
+
 type Listener = () => void;
 let current: FsClipboard | null = null;
 const listeners = new Set<Listener>();

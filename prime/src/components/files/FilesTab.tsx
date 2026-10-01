@@ -22,7 +22,7 @@ import { useMediaQuery } from './hooks/useMediaQuery';
 import { useMemoryNav } from './hooks/useMemoryNav';
 import { useNavHistory } from './hooks/useNavHistory';
 import { usePins } from './hooks/usePins';
-import type { ClipItem } from './logic/clipboard';
+import { clipboardAfterMove, clipboardStore, type ClipItem } from './logic/clipboard';
 import type { PaneNav } from './logic/paneHistory';
 import { addPin } from './logic/pins';
 import { dropLabel } from './logic/hints';
@@ -278,6 +278,13 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     confirm: (m) => window.confirm(m),
     onError,
     onStatus: setStatus,
+    // A cut from another server leaves the clipboard only once its items
+    // have really moved; whatever was kept stays ready to paste again.
+    onMoved: (sid, paths) => {
+      const before = clipboardStore.get();
+      const after = clipboardAfterMove(before, sid, paths);
+      if (after !== before) clipboardStore.set(after);
+    },
     afterMutation,
   };
 
@@ -287,7 +294,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     if (src.serverId === dstServer) {
       void actionsOf(dstPane).transfer(src.items.map((i) => ({ path: i.path, isDir: i.isDir })), dir, mode);
     } else {
-      void runCrossTransfer(crossDeps, src, { serverId: dstServer, dir }, mode);
+      void runCrossTransfer(crossDeps, src, { serverId: dstServer, dir, label: `${serverName(dstServer)}:${dir}` }, mode);
     }
   };
 
@@ -318,11 +325,9 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     void runCrossTransfer(
       crossDeps,
       { serverId: c.serverId, items: c.items },
-      { serverId: serverOf(pane), dir },
+      { serverId: serverOf(pane), dir, label: `${serverName(serverOf(pane))}:${dir}` },
       c.mode === 'cut' ? 'move' : 'copy',
-    ).then(() => {
-      if (c.mode === 'cut') clipboard.set(null);
-    });
+    );
   };
 
   const externalDrop = (pane: PaneId, dt: DataTransfer, dir: string) => {
