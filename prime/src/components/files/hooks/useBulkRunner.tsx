@@ -52,11 +52,37 @@ export function useBulkRunner(onRetried: () => void): {
   const [conflict, setConflict] = React.useState<PendingConflict | null>(null);
   const runRef = React.useRef<BulkRun | null>(null);
   const cancelHook = React.useRef<(() => void) | null>(null);
+  const pending = React.useRef<PendingConflict | null>(null);
+  const mounted = React.useRef(true);
 
   const askConflict = React.useCallback<AskConflict>(
-    (item) => new Promise((resolve) => setConflict({ item, resolve })),
+    (item) =>
+      new Promise((resolve) => {
+        // Nobody can answer once the explorer is gone (e.g. the user switched
+        // dashboard tab mid-scan): treat it as "Cancel all".
+        if (!mounted.current) {
+          resolve({ choice: 'skip', applyToAll: true, cancelled: true });
+          return;
+        }
+        const p = { item, resolve };
+        pending.current = p;
+        setConflict(p);
+      }),
     [],
   );
+
+  // Leaving the explorer cancels the run and answers any open prompt, so a
+  // cross-server run can finish and release its one-at-a-time guard.
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      runRef.current?.cancel();
+      cancelHook.current?.();
+      pending.current?.resolve({ choice: 'skip', applyToAll: true, cancelled: true });
+      pending.current = null;
+    };
+  }, []);
 
   const runBulk = React.useCallback<RunBulk>(
     async (title, items, op, opts = {}) => {
@@ -130,11 +156,13 @@ export function useBulkRunner(onRetried: () => void): {
           item={conflict.item}
           onAnswer={(choice, applyToAll) => {
             conflict.resolve({ choice, applyToAll });
+            pending.current = null;
             setConflict(null);
           }}
           onCancelAll={() => {
             cancel();
             conflict.resolve({ choice: 'skip', applyToAll: true, cancelled: true });
+            pending.current = null;
             setConflict(null);
           }}
         />

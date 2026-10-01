@@ -94,3 +94,20 @@ describe('useNavHistory (jsdom)', () => {
     expect(window.history.length).toBe(len);
   });
 });
+
+describe('useNavHistory — entries rewritten by split view', () => {
+  it('reads the left path from a split hash instead of treating it as a folder name', async () => {
+    h = mount({ enabled: true, initialPath: '/' });
+    act(() => h!.nav().go('/etc'));
+    act(() => h!.nav().go('/var'));
+    // Split view rewrote the /etc entry while it was visited.
+    await browserBack();
+    window.history.replaceState(window.history.state, '', '#files:/etc|srv-1:/tmp');
+    await act(async () => {
+      window.history.forward();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    await browserBack();
+    expect(h.nav().path).toBe('/etc');
+  });
+});

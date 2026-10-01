@@ -190,8 +190,10 @@ async function crossRun(
   // "Retry failed", so a retried move still removes its sources.
   const done = new Set<string>();
   const trashed = new Set<string>();
+  let pass = 0;
   const settle = async () => {
-    if (plan.skipped.length > 0) {
+    pass++;
+    if (pass === 1 && plan.skipped.length > 0) {
       notes.push(
         `${plan.skipped.length} link(s) or special file(s) skipped: ${plan.skipped.slice(0, 3).map(baseName).join(', ')}${plan.skipped.length > 3 ? '…' : ''}`,
       );
@@ -209,6 +211,10 @@ async function crossRun(
         }
       }
       const keptCount = plan.tops.length - trashed.size;
+      if (pass > 1 && keptCount === 0 && movedNow.length > 0 && notes.length === 0) {
+        // Replaces the "kept at the source" message from the first pass.
+        notes.push('All items moved.');
+      }
       if (keptCount > 0) {
         notes.push(`${keptCount} ${keptCount === 1 ? 'item was' : 'items were'} kept at the source because not everything was moved`);
       }

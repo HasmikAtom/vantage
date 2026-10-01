@@ -9,6 +9,7 @@ import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
 import { parentOf } from './fsPath';
 import { PIN_TARGET, useDnd, type DropSource } from './useDnd';
+import { ignoresExplorerKeys } from './keyTarget';
 import { dropLabel, emptyText, hintFor } from './logic/hints';
 import { fetchListing, useDirListing } from './hooks/useDirListing';
 import { useDirSizes } from './hooks/useDirSizes';
@@ -169,7 +170,7 @@ export function FilePane(p: FilePaneProps) {
   // --- keyboard ---------------------------------------------------------------
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (p.blocked) return;
-    if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]')) return;
+    if (ignoresExplorerKeys(e.target as HTMLElement)) return;
     const s = shortcutFor(e, p.canControl, p.split, e.target === e.currentTarget);
     if (!s) {
       const ch = typeAheadChar(e);

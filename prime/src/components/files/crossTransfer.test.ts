@@ -285,3 +285,18 @@ describe('runCrossTransfer — minor fixes', () => {
     expect(calls.errors[0]).toMatch(/Could not create logs on the destination: no space/);
   });
 });
+
+describe('runCrossTransfer — retry messages', () => {
+  it('a retry that completes the move replaces the earlier "kept" message', async () => {
+    const { d, calls } = setup({ failOnce: '/src/logs/old/b.log', over: { runBulk: runBulkWithRetry } });
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.errors[0]).toMatch(/kept at the source/);
+    expect(calls.errors[calls.errors.length - 1]).toMatch(/All items moved/);
+  });
+
+  it('reports skipped links once, not on every pass', async () => {
+    const { d, calls } = setup({ failOnce: '/src/withlink/a', over: { runBulk: runBulkWithRetry } });
+    await runCrossTransfer(d, { serverId: A, items: [{ path: '/src/withlink', isDir: true, size: 0 }] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(calls.errors.filter((e) => /skipped/.test(e))).toHaveLength(1);
+  });
+});

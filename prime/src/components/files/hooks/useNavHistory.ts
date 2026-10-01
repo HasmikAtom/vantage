@@ -8,10 +8,18 @@ import {
   navOnEnable,
   navPop,
   navPush,
-  pathFromHash,
   type NavModel,
 } from '../logic/history';
 import type { PaneNav } from '../logic/paneHistory';
+import { parseFilesHash } from '../logic/splitHash';
+
+// Split view rewrites some entries to #files:<left>|<server>:<right>;
+// single-pane navigation reads the left path from those.
+function pathOf(hash: string): string | null {
+  const h = parseFilesHash(hash);
+  if (!h) return null;
+  return h.mode === 'split' ? h.left : h.path;
+}
 
 function stateIdx(state: unknown): unknown {
   return state && typeof state === 'object' ? (state as { filesIdx?: unknown }).filesIdx : undefined;
@@ -28,7 +36,7 @@ function stateIdx(state: unknown): unknown {
 export function useNavHistory(opts: { enabled?: boolean; initialPath?: string } = {}): PaneNav {
   const enabled = opts.enabled ?? true;
   const [path, setPath] = React.useState<string>(
-    () => opts.initialPath ?? pathFromHash(window.location.hash) ?? ROOT,
+    () => opts.initialPath ?? pathOf(window.location.hash) ?? ROOT,
   );
   const pathRef = React.useRef(path);
   const model = React.useRef<NavModel>(navInit(stateIdx(window.history.state)));
@@ -43,7 +51,7 @@ export function useNavHistory(opts: { enabled?: boolean; initialPath?: string } 
     // Stamp the entry we are on so popstate can recognise it.
     window.history.replaceState({ filesIdx: model.current.idx }, '', hashFor(pathRef.current));
     const onPop = (e: PopStateEvent) => {
-      const p = pathFromHash(window.location.hash);
+      const p = pathOf(window.location.hash);
       if (p === null) return;
       model.current = navPop(model.current, stateIdx(e.state));
       pathRef.current = p;
