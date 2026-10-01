@@ -1,5 +1,5 @@
 import type { FsEntry, FsEntryType } from '@/types';
-import { cancelTransfer, createTransfer, fetchTransferStatus, fsDelete, fsList, fsMkdir } from '@/api';
+import { cancelTransfer, createTransfer, fetchTransferStatus, fsDelete, fsList, fsMkdir, fsStat } from '@/api';
 import { baseName, copyName, formatBytes, joinPath, parentOf } from './fsPath';
 import { fetchListing } from './hooks/useDirListing';
 import type { AskConflict, RunBulk } from './hooks/useBulkRunner';
@@ -29,6 +29,9 @@ export interface CrossApi {
   awaitTransfer(id: string): Promise<void>;
   cancelTransfer(id: string): Promise<void>;
   trash(serverId: string, path: string): Promise<void>;
+  // Size of a destination file, or null if it doesn't exist; used when gate
+  // no longer knows a transfer (restart, or finished long ago).
+  stat?: (serverId: string, path: string) => Promise<{ size: number } | null>;
 }
 
 export const defaultCrossApi: CrossApi = {
@@ -42,6 +45,14 @@ export const defaultCrossApi: CrossApi = {
   awaitTransfer: (id) => pollTransfer(id, fetchTransferStatus),
   cancelTransfer: (id) => cancelTransfer(id),
   trash: (serverId, path) => fsDelete(serverId, path),
+  stat: async (serverId, path) => {
+    try {
+      const e = await fsStat(serverId, path);
+      return e.type === 'file' ? { size: e.size } : null;
+    } catch {
+      return null;
+    }
+  },
 };
 
 export interface CrossDeps {
@@ -56,10 +67,16 @@ export interface CrossDeps {
   // Sources that were moved (copied and then trashed at the source),
   // reported after each pass including retries.
   onMoved?: (serverId: string, paths: string[]) => void;
+  // True while another operation still holds the progress dialog.
+  isBusy?: () => boolean;
+  // Aborting cancels the run while it is still scanning/preparing.
+  signal?: AbortSignal;
   afterMutation(serverId: string, dirs: readonly string[]): Promise<void>;
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+class CancelledScan extends Error {}
 
 async function mkdirOk(api: CrossApi, serverId: string, path: string): Promise<void> {
   try {
@@ -81,6 +98,10 @@ export async function runCrossTransfer(
 ): Promise<string[]> {
   if (active) {
     d.onError('Another cross-server copy is already running — wait for it to finish.');
+    return [];
+  }
+  if (d.isBusy?.()) {
+    d.onError('Finish or close the current operation first.');
     return [];
   }
   active = true;
@@ -105,20 +126,31 @@ async function crossRun(
     notes.length = 0;
   };
 
+  const cancelledNote = `${verb} cancelled — nothing was changed.`;
+  const isCancelled = () => d.signal?.aborted === true;
+
   let plan: CrossPlan;
   d.onStatus?.('Scanning folders…');
   try {
     plan = await planCrossTransfer(
       src.items,
-      (p) => d.api.list(src.serverId, p),
+      (p) => {
+        if (isCancelled()) throw new CancelledScan();
+        return d.api.list(src.serverId, p);
+      },
       undefined,
       (n) => d.onStatus?.(`Scanning folders… ${n} ${n === 1 ? 'folder' : 'folders'}`),
     );
   } catch (e) {
-    d.onError(e instanceof TooManyFilesError ? e.message : `Could not read the source folders: ${msg(e)}`);
+    if (e instanceof CancelledScan) d.onError(cancelledNote);
+    else d.onError(e instanceof TooManyFilesError ? e.message : `Could not read the source folders: ${msg(e)}`);
     return [];
   }
   d.onStatus?.(null);
+  if (isCancelled()) {
+    d.onError(cancelledNote);
+    return [];
+  }
   if (
     plan.files.length > CROSS_CONFIRM_FILES &&
     !d.confirm(`${verb} ${plan.files.length.toLocaleString('en-US')} files (${formatBytes(plan.totalBytes)}) to ${dst.label ?? 'another server'}?`)
@@ -138,6 +170,8 @@ async function crossRun(
   const taken = new Set(existing.keys());
   const target = new Map<string, { name: string; overwrite: boolean }>();
   const kept = new Set<string>();
+  // Tops the user chose to Skip (kept on purpose, not because of a failure).
+  const userSkipped = new Set<string>();
   let sticky: ConflictChoice | null = null;
   for (const t of plan.tops) {
     const there = existing.get(t.name);
@@ -150,7 +184,7 @@ async function crossRun(
     if (!choice) {
       const a = await d.askConflict({ id: t.path, label: t.name });
       if (a.cancelled) {
-        d.onError(`${verb} cancelled — nothing was changed.`);
+        d.onError(cancelledNote);
         return [];
       }
       choice = a.choice;
@@ -158,6 +192,7 @@ async function crossRun(
     }
     if (choice === 'skip') {
       kept.add(t.path);
+      userSkipped.add(t.path);
     } else if (choice === 'replace') {
       if (t.isDir || there === 'dir') {
         notes.push(`${t.name}: folders can't be replaced — choose Keep both or Skip`);
@@ -210,13 +245,16 @@ async function crossRun(
           notes.push(`Copied, but could not remove ${baseName(p)} from the source: ${msg(e)}`);
         }
       }
-      const keptCount = plan.tops.length - trashed.size;
+      const keptCount = plan.tops.length - trashed.size - userSkipped.size;
       if (pass > 1 && keptCount === 0 && movedNow.length > 0 && notes.length === 0) {
         // Replaces the "kept at the source" message from the first pass.
         notes.push('All items moved.');
       }
+      if (pass === 1 && userSkipped.size > 0) {
+        notes.push(`${userSkipped.size} skipped (you chose Skip)`);
+      }
       if (keptCount > 0) {
-        notes.push(`${keptCount} ${keptCount === 1 ? 'item was' : 'items were'} kept at the source because not everything was moved`);
+        notes.push(`${keptCount} ${keptCount === 1 ? 'item was' : 'items were'} kept at the source because not everything was copied`);
       }
       await d.afterMutation(src.serverId, [...new Set(plan.tops.map((t) => parentOf(t.path)))]);
     }
@@ -245,7 +283,15 @@ async function crossRun(
       });
       running.add(id);
       try {
-        await d.api.awaitTransfer(id);
+        try {
+          await d.api.awaitTransfer(id);
+        } catch (e) {
+          // Gate forgot the transfer (restart, or the tab slept past its
+          // retention): trust the destination if the file is complete.
+          const forgotten = typeof e === 'object' && e !== null && (e as { unknownTransfer?: unknown }).unknownTransfer === true;
+          const there = forgotten && d.api.stat ? await d.api.stat(dst.serverId, f.rel ? joinRel(top, f.rel) : top) : null;
+          if (!there || there.size !== f.size) throw e;
+        }
         done.add(item.id);
       } finally {
         running.delete(id);

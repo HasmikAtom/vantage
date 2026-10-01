@@ -34,7 +34,11 @@ export async function pollTransfer(
       p = await fetchStatus(id);
       errors = 0;
     } catch (e) {
-      if (isNotFound(e)) throw new Error('transfer no longer known to the dashboard (gate restarted?)');
+      if (isNotFound(e)) {
+        // The caller can still check the destination: the copy may have
+        // finished before gate forgot about it.
+        throw Object.assign(new Error('transfer no longer known to the dashboard (gate restarted?)'), { unknownTransfer: true });
+      }
       errors++;
       if (errors >= maxErrors) throw new Error(`lost contact with the transfer: ${e instanceof Error ? e.message : String(e)}`);
       await sleep(interval);

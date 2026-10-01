@@ -4,6 +4,7 @@ import type {
   CreateContainerResponse,
   FirewallRule,
   FirewallStatus,
+  FsEntry,
   FsListResponse,
   FsReadResponse,
   ReclaimableContainer,
@@ -513,6 +514,12 @@ export function deleteFirewallRule(serverId: string, rule: FirewallRule): Promis
 export function fsList(serverId: string, path: string): Promise<FsListResponse> {
   return apiFetch<FsListResponse>(
     `${serverBase(serverId)}/fs/list?path=${encodeURIComponent(path)}`,
+  );
+}
+
+export function fsStat(serverId: string, path: string): Promise<FsEntry> {
+  return apiFetch<FsEntry>(
+    `${serverBase(serverId)}/fs/stat?path=${encodeURIComponent(path)}`,
   );
 }
 

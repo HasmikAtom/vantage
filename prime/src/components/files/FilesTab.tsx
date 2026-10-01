@@ -265,8 +265,9 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     });
   }, []);
 
-  const { runBulk, askConflict, dialogs: bulkDialogs } = useBulkRunner(bump);
   const onError = React.useCallback((m: string) => setBanner(m), []);
+  const onBusy = React.useCallback(() => setBanner('Finish or close the current operation first.'), []);
+  const { runBulk, askConflict, isBusy, dialogs: bulkDialogs } = useBulkRunner(bump, onBusy);
   const leftActions = useFileActions({ serverId, runBulk, afterMutation: leftAfter, onError });
   const rightActions = useFileActions({ serverId: rightServerId, runBulk, afterMutation: rightAfter, onError });
   const actionsOf = (pane: PaneId) => (pane === 'right' ? rightActions : leftActions);
@@ -278,6 +279,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     confirm: (m) => window.confirm(m),
     onError,
     onStatus: setStatus,
+    isBusy,
     // A cut from another server leaves the clipboard only once its items
     // have really moved; whatever was kept stays ready to paste again.
     onMoved: (sid, paths) => {
@@ -288,13 +290,29 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     afterMutation,
   };
 
+  // Cross-server runs can be cancelled while they scan (status line Cancel,
+  // or leaving the Files tab).
+  const scanAbort = React.useRef<AbortController | null>(null);
+  React.useEffect(() => () => scanAbort.current?.abort(), []);
+  const startCross = (
+    src: DropSource,
+    dst: { serverId: string; dir: string; label: string },
+    mode: 'copy' | 'move',
+  ) => {
+    const ctrl = new AbortController();
+    scanAbort.current = ctrl;
+    void runCrossTransfer({ ...crossDeps, signal: ctrl.signal }, src, dst, mode).finally(() => {
+      if (scanAbort.current === ctrl) scanAbort.current = null;
+    });
+  };
+
   // --- commands ---------------------------------------------------------------
   const moveItems = (src: DropSource, dstPane: PaneId, dir: string, mode: 'copy' | 'move') => {
     const dstServer = serverOf(dstPane);
     if (src.serverId === dstServer) {
       void actionsOf(dstPane).transfer(src.items.map((i) => ({ path: i.path, isDir: i.isDir })), dir, mode);
     } else {
-      void runCrossTransfer(crossDeps, src, { serverId: dstServer, dir, label: `${serverName(dstServer)}:${dir}` }, mode);
+      startCross(src, { serverId: dstServer, dir, label: `${serverName(dstServer)}:${dir}` }, mode);
     }
   };
 
@@ -322,8 +340,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
       void actionsOf(pane).paste(c, dir);
       return;
     }
-    void runCrossTransfer(
-      crossDeps,
+    startCross(
       { serverId: c.serverId, items: c.items },
       { serverId: serverOf(pane), dir, label: `${serverName(serverOf(pane))}:${dir}` },
       c.mode === 'cut' ? 'move' : 'copy',
@@ -548,8 +565,11 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
       )}
 
       {status && (
-        <div className="rounded border px-3 py-1.5 text-xs text-muted-foreground" role="status">
-          {status}
+        <div className="flex items-center justify-between gap-2 rounded border px-3 py-1.5 text-xs text-muted-foreground" role="status">
+          <span>{status}</span>
+          <button type="button" className="hover:text-foreground" onClick={() => scanAbort.current?.abort()}>
+            Cancel
+          </button>
         </div>
       )}
 

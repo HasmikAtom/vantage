@@ -300,3 +300,82 @@ describe('runCrossTransfer — retry messages', () => {
     expect(calls.errors.filter((e) => /skipped/.test(e))).toHaveLength(1);
   });
 });
+
+describe('runCrossTransfer — 1.3.1 fixes', () => {
+  const file = (path: string, size = 3) => ({ path, isDir: false, size, type: 'file' as const });
+  const unknownTransfer = () => Object.assign(new Error('transfer no longer known to the dashboard'), { unknownTransfer: true });
+
+  it('does not start while another operation still holds the progress dialog', async () => {
+    const { d, calls } = setup({ over: { isBusy: () => true } });
+    let listed = 0;
+    const list = d.api.list;
+    d.api.list = async (s, p) => { listed++; return list(s, p); };
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(listed).toBe(0);
+    expect(calls.errors[0]).toMatch(/Finish or close the current operation first/);
+  });
+
+  it('scanning can be cancelled and nothing is changed', async () => {
+    const ctrl = new AbortController();
+    const { d, calls } = setup({ over: { signal: ctrl.signal } });
+    const list = d.api.list;
+    d.api.list = async (s, p) => { ctrl.abort(); return list(s, p); };
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.mkdir).toEqual([]);
+    expect(calls.transfers).toEqual([]);
+    expect(calls.trash).toEqual([]);
+    expect(calls.errors[0]).toBe('Move cancelled — nothing was changed.');
+  });
+
+  it('reports skipped-by-choice separately from kept-because-of-failure', async () => {
+    const { d, calls } = setup({ existing: { 'f.txt': 'file' } });
+    await runCrossTransfer(d, { serverId: A, items: [file('/src/f.txt'), file('/src/g.txt')] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.trash).toEqual(['/src/g.txt']);
+    expect(calls.errors[0]).toMatch(/1 skipped \(you chose Skip\)/);
+    expect(calls.errors[0]).not.toMatch(/kept at the source/);
+  });
+
+  it('a transfer gate forgot counts as done when the destination file is complete', async () => {
+    const { d, calls } = setup();
+    d.api.awaitTransfer = async () => { throw unknownTransfer(); };
+    d.api.stat = async () => ({ size: 3 });
+    await runCrossTransfer(d, { serverId: A, items: [file('/src/f.txt', 3)] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.trash).toEqual(['/src/f.txt']);
+  });
+
+  it('…and as failed when the destination file is missing or a different size', async () => {
+    for (const st of [null, { size: 1 }]) {
+      const { d, calls } = setup();
+      d.api.awaitTransfer = async () => { throw unknownTransfer(); };
+      d.api.stat = async () => st;
+      await runCrossTransfer(d, { serverId: A, items: [file('/src/f.txt', 3)] }, { serverId: B, dir: '/dst' }, 'move');
+      expect(calls.trash).toEqual([]);
+    }
+  });
+
+  it('a finishing step that runs twice trashes each source only once', async () => {
+    const twice: RunBulk = async (_t, items, op, opts) => {
+      const states = await new BulkRun(items, op, noConflict, opts?.concurrency ?? 4).start();
+      await opts?.onSettled?.(states);
+      await opts?.onSettled?.(states);
+      return states;
+    };
+    const { d, calls } = setup({ over: { runBulk: twice } });
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.trash).toEqual(['/src/logs']);
+  });
+
+  it('releases the one-at-a-time lock after a cancelled prompt or a declined confirmation', async () => {
+    const cancelled = setup({
+      existing: { 'f.txt': 'file' },
+      over: { askConflict: async () => ({ choice: 'skip', applyToAll: true, cancelled: true }) },
+    });
+    await runCrossTransfer(cancelled.d, { serverId: A, items: [file('/src/f.txt')] }, { serverId: B, dir: '/dst' }, 'copy');
+    const declined = setup({ over: { confirm: () => false } });
+    await runCrossTransfer(declined.d, { serverId: A, items: [{ path: '/src/many', isDir: true, size: 0 }] }, { serverId: B, dir: '/dst' }, 'copy');
+    const next = setup();
+    await runCrossTransfer(next.d, { serverId: A, items: [file('/src/f.txt')] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(next.calls.transfers).toHaveLength(1);
+    expect(next.calls.errors.join(' ')).not.toMatch(/already running/);
+  });
+});

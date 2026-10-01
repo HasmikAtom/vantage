@@ -43,9 +43,16 @@ interface PendingConflict {
 // and stays open at the end only when something failed or it was already
 // showing. askConflict exposes the same conflict dialog to callers that
 // resolve conflicts before a run (cross-server transfers).
-export function useBulkRunner(onRetried: () => void): {
+// One operation at a time: from a run's start until its progress dialog is
+// gone (including a finished dialog that still offers "Retry failed"), a
+// new runBulk is refused — its items come back 'cancelled' and onBusy runs.
+export function useBulkRunner(
+  onRetried: () => void,
+  onBusy?: () => void,
+): {
   runBulk: RunBulk;
   askConflict: AskConflict;
+  isBusy: () => boolean;
   dialogs: React.ReactNode;
 } {
   const [view, setView] = React.useState<ViewState | null>(null);
@@ -54,6 +61,11 @@ export function useBulkRunner(onRetried: () => void): {
   const cancelHook = React.useRef<(() => void) | null>(null);
   const pending = React.useRef<PendingConflict | null>(null);
   const mounted = React.useRef(true);
+  const busy = React.useRef(false);
+  const shown = React.useRef(false);
+  const onBusyRef = React.useRef(onBusy);
+  onBusyRef.current = onBusy;
+  const isBusy = React.useCallback(() => busy.current, []);
 
   const askConflict = React.useCallback<AskConflict>(
     (item) =>
@@ -86,10 +98,15 @@ export function useBulkRunner(onRetried: () => void): {
 
   const runBulk = React.useCallback<RunBulk>(
     async (title, items, op, opts = {}) => {
+      if (busy.current) {
+        onBusyRef.current?.();
+        return items.map((item): ItemState => ({ item, status: 'cancelled', error: null }));
+      }
       if (items.length === 0) {
         await opts.onSettled?.([]);
         return [];
       }
+      busy.current = true;
       const run = new BulkRun(
         items,
         op,
@@ -109,18 +126,26 @@ export function useBulkRunner(onRetried: () => void): {
         op,
         opts,
       });
-      const timer = window.setTimeout(() => setView((v) => (v ? { ...v, visible: true } : v)), 1000);
+      shown.current = items.length > 5;
+      const timer = window.setTimeout(() => {
+        shown.current = true;
+        setView((v) => (v ? { ...v, visible: true } : v));
+      }, 1000);
       const final = await run.start();
       window.clearTimeout(timer);
       runRef.current = null;
       cancelHook.current = null;
       await opts.onSettled?.(final);
       const failed = final.some((s) => s.status === 'failed');
-      setView((v) => {
-        if (!v) return v;
-        if (!v.visible && !failed) return null;
-        return { ...v, states: final, finished: true, visible: true };
-      });
+      // A quick clean run never showed a dialog: free right away. Otherwise
+      // the finished dialog (and its Retry) holds the slot until closed.
+      if (!shown.current && !failed) {
+        busy.current = false;
+        setView(null);
+      } else {
+        shown.current = true;
+        setView((v) => (v ? { ...v, states: final, finished: true, visible: true } : v));
+      }
       return final;
     },
     [askConflict],
@@ -135,6 +160,7 @@ export function useBulkRunner(onRetried: () => void): {
     if (!view) return;
     const { title, op, states, opts } = view;
     setView(null);
+    busy.current = false;
     await runBulk(`${title} (retry)`, failedItems(states), op, opts);
     onRetried();
   }, [view, runBulk, onRetried]);
@@ -148,7 +174,10 @@ export function useBulkRunner(onRetried: () => void): {
           finished={view.finished}
           onCancel={cancel}
           onRetry={() => void retry()}
-          onClose={() => setView(null)}
+          onClose={() => {
+            busy.current = false;
+            setView(null);
+          }}
         />
       )}
       {conflict && (
@@ -170,5 +199,5 @@ export function useBulkRunner(onRetried: () => void): {
     </>
   );
 
-  return { runBulk, askConflict, dialogs };
+  return { runBulk, askConflict, isBusy, dialogs };
 }
