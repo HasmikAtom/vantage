@@ -537,21 +537,19 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
       serverLabel={serverName(serverOf(pane))}
       showHints={showHints}
       onHideHints={() => setHints(false)}
-      {...(pane === 'right' && tipOpen
-        ? {
-            tip: (
-              <div className="flex items-start gap-2 border-b bg-primary/5 px-3 py-2 text-xs">
-                <span className="flex-1">
-                  Pick a server and folder here. Tab switches panes; F5/F6 copy/move across.
-                </span>
-                <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="Dismiss tip" onClick={dismissTip}>
-                  ✕
-                </button>
-              </div>
-            ),
-          }
-        : {})}
     />
+  );
+
+  // First time split view opens: one tip across the top of both panes.
+  const splitTip = split && tipOpen && (
+    <div className="flex items-start gap-2 border-b bg-primary/5 px-3 py-1.5 text-xs">
+      <span className="flex-1">
+        Split view: pick a server and folder in each pane. Tab switches panes; F5/F6 copy/move to the other pane.
+      </span>
+      <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="Dismiss tip" onClick={dismissTip}>
+        ✕
+      </button>
+    </div>
   );
 
   return (
@@ -646,6 +644,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
             )}
             {split && !wide ? (
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {splitTip}
                 <div className="flex border-b text-xs" role="tablist">
                   {(['left', 'right'] as const).map((pane) => (
                     <button
@@ -666,21 +665,24 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
                 {renderPane(activePane)}
               </div>
             ) : split ? (
-              <div ref={panesRef} className="flex min-h-0 min-w-0 flex-1">
-                <div className="flex min-h-0 min-w-0" style={{ flex: `${panes.ratio} 1 0%` }}>
-                  {renderPane('left')}
-                </div>
-                {/* Divider: sits over the right pane's border. */}
-                <div
-                  {...panes.handleProps}
-                  className={cn(
-                    'relative z-10 -mr-[3px] w-[5px] shrink-0 cursor-col-resize touch-none outline-none transition-colors',
-                    'hover:bg-primary/30 focus-visible:bg-primary/40',
-                    panes.dragging && 'bg-primary/50',
-                  )}
-                />
-                <div className="flex min-h-0 min-w-0" style={{ flex: `${1 - panes.ratio} 1 0%` }}>
-                  {renderPane('right')}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {splitTip}
+                <div ref={panesRef} className="flex min-h-0 min-w-0 flex-1">
+                  <div className="flex min-h-0 min-w-0" style={{ flex: `${panes.ratio} 1 0%` }}>
+                    {renderPane('left')}
+                  </div>
+                  {/* Divider: sits over the right pane's border. */}
+                  <div
+                    {...panes.handleProps}
+                    className={cn(
+                      'relative z-10 -mr-[3px] w-[5px] shrink-0 cursor-col-resize touch-none outline-none transition-colors',
+                      'hover:bg-primary/30 focus-visible:bg-primary/40',
+                      panes.dragging && 'bg-primary/50',
+                    )}
+                  />
+                  <div className="flex min-h-0 min-w-0" style={{ flex: `${1 - panes.ratio} 1 0%` }}>
+                    {renderPane('right')}
+                  </div>
                 </div>
               </div>
             ) : (

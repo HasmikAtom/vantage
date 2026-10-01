@@ -70,8 +70,6 @@ export interface FilePaneProps {
   serverLabel: string;
   showHints: boolean;
   onHideHints(): void;
-  // One-off callout rendered above the list (first time split view opens).
-  tip?: React.ReactNode;
 }
 
 export function listingError(err: unknown): string {
@@ -393,7 +391,6 @@ export function FilePane(p: FilePaneProps) {
           onHelp={() => cmd({ type: 'help' })}
         />
       </AddressBar>
-      {p.tip}
       <FileList
         compact={p.split}
         scrollRef={listRef}
