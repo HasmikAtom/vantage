@@ -14,3 +14,23 @@ export function canDropInto(sources: readonly string[], targetDir: string): bool
   if (sources.length === 0) return false;
   return sources.every((s) => !isSameOrDescendant(s, targetDir) && parentOf(s) !== targetDir);
 }
+
+// Between servers a plain drag copies (like dragging between drives in
+// Windows); Shift makes it a move. On one server the existing rule holds.
+export function crossDropMode(
+  e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  sameServer: boolean,
+): 'copy' | 'move' {
+  if (sameServer) return dropMode(e);
+  return e.shiftKey ? 'move' : 'copy';
+}
+
+export function canDropAcross(
+  sourceServer: string,
+  sources: readonly string[],
+  targetServer: string,
+  targetDir: string,
+): boolean {
+  if (sources.length === 0) return false;
+  return sourceServer === targetServer ? canDropInto(sources, targetDir) : true;
+}

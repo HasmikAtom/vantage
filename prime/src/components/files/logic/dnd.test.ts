@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canDropInto, dropMode } from './dnd';
+import { canDropAcross, canDropInto, crossDropMode, dropMode } from './dnd';
 
 describe('dropMode', () => {
   it('moves by default and copies with Ctrl or Cmd', () => {
@@ -26,5 +26,35 @@ describe('canDropInto', () => {
   });
   it('does not confuse name prefixes with descendants', () => {
     expect(canDropInto(['/a/y'], '/a/yz')).toBe(true);
+  });
+});
+
+describe('crossDropMode', () => {
+  const ev = (o: Partial<{ ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }> = {}) => ({
+    ctrlKey: false, metaKey: false, shiftKey: false, ...o,
+  });
+  it('same server: move by default, Ctrl/Cmd copies', () => {
+    expect(crossDropMode(ev(), true)).toBe('move');
+    expect(crossDropMode(ev({ ctrlKey: true }), true)).toBe('copy');
+  });
+  it('different servers: copy by default, Shift moves', () => {
+    expect(crossDropMode(ev(), false)).toBe('copy');
+    expect(crossDropMode(ev({ ctrlKey: true }), false)).toBe('copy');
+    expect(crossDropMode(ev({ shiftKey: true }), false)).toBe('move');
+  });
+});
+
+describe('canDropAcross', () => {
+  it('applies the same-server rules on one server', () => {
+    expect(canDropAcross('a', ['/x/f'], 'a', '/x')).toBe(false);
+    expect(canDropAcross('a', ['/x/d'], 'a', '/x/d/sub')).toBe(false);
+    expect(canDropAcross('a', ['/x/f'], 'a', '/y')).toBe(true);
+  });
+  it('allows any folder on another server, even with the same path', () => {
+    expect(canDropAcross('a', ['/x/f'], 'b', '/x')).toBe(true);
+    expect(canDropAcross('a', ['/x/d'], 'b', '/x/d')).toBe(true);
+  });
+  it('refuses an empty drag', () => {
+    expect(canDropAcross('a', [], 'b', '/x')).toBe(false);
   });
 });
