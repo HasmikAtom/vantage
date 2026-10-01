@@ -74,3 +74,24 @@ describe('backgroundMenu', () => {
     expect(labels(backgroundMenu('/d', ctx({ showHidden: true })))).toContain('Hide hidden files');
   });
 });
+
+describe('itemMenu in split view', () => {
+  it('offers copy/move to the other pane after Paste', () => {
+    const m = itemMenu([entry('a.txt'), entry('b.txt')], ctx({ toOther: noop }));
+    expect(labels(m)).toEqual([
+      'Download 2 files', 'Cut', 'Copy', 'Copy to other pane', 'Move to other pane', 'Move 2 items to trash',
+    ]);
+    expect(find(m, 'Copy to other pane')).toMatchObject({ shortcut: 'F5', disabled: false });
+    expect(find(m, 'Move to other pane')).toMatchObject({ shortcut: 'F6', disabled: false });
+  });
+
+  it('disables them for a viewer', () => {
+    const m = itemMenu([entry('a.txt')], ctx({ toOther: noop, canControl: false }));
+    expect(find(m, 'Copy to other pane')).toMatchObject({ disabled: true, title: 'Operator role required' });
+    expect(find(m, 'Move to other pane')).toMatchObject({ disabled: true, title: 'Operator role required' });
+  });
+
+  it('are absent outside split view', () => {
+    expect(labels(itemMenu([entry('a.txt')], ctx()))).not.toContain('Copy to other pane');
+  });
+});

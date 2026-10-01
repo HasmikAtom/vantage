@@ -62,6 +62,8 @@ export interface FilePaneProps {
   onExternalDrop(dt: DataTransfer, targetDir: string): void;
   onCommand(cmd: PaneCommand): void;
   onToggleSidebar(): void;
+  // Split view: "server:/path" of the other pane, for button tooltips.
+  otherTarget: string | null;
 }
 
 export function listingError(err: unknown): string {
@@ -383,6 +385,16 @@ export function FilePane(p: FilePaneProps) {
           const r = ev.currentTarget.getBoundingClientRect();
           cmd({ type: 'menu', x: r.left, y: r.bottom + 4, targets: selected });
         }}
+        {...(p.otherTarget !== null
+          ? {
+              toOther: {
+                arrow: p.paneId === 'left' ? ('→' as const) : ('←' as const),
+                target: p.otherTarget,
+                onCopy: () => selected.length > 0 && cmd({ type: 'toOther', mode: 'copy', entries: selected }),
+                onMove: () => selected.length > 0 && cmd({ type: 'toOther', mode: 'move', entries: selected }),
+              },
+            }
+          : {})}
       />
     </div>
   );

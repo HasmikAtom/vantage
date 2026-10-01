@@ -354,6 +354,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
       refresh: () => void afterMutation(sid, [navOf(pane).path]),
       toggleHidden: () => setShowHidden((v) => !v),
       openTrashBin: () => setModal({ kind: 'trashBin', pane }),
+      ...(split ? { toOther: (list: readonly FsEntry[], mode: 'copy' | 'move') => toOther(pane, [...list], mode) } : {}),
     };
   };
 
@@ -457,6 +458,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
       onExternalDrop={(dt, dir) => externalDrop(pane, dt, dir)}
       onCommand={(c) => handleCommand(pane, c)}
       onToggleSidebar={() => setSidebarOpen((v) => !v)}
+      otherTarget={split ? `${serverName(serverOf(otherOf(pane)))}:${navOf(otherOf(pane)).path}` : null}
     />
   );
 

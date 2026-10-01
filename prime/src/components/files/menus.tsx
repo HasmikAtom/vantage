@@ -29,6 +29,8 @@ export interface MenuCtx {
   cut(list: readonly FsEntry[]): void;
   copy(list: readonly FsEntry[]): void;
   paste(dir: string): void;
+  // Split view only: copy/move the targets into the other pane's folder.
+  toOther?: (list: readonly FsEntry[], mode: 'copy' | 'move') => void;
   rename(e: FsEntry): void;
   copyTo(e: FsEntry): void;
   moveTo(e: FsEntry): void;
@@ -94,6 +96,11 @@ export function itemMenu(targets: readonly FsEntry[], c: MenuCtx): MenuEntry[] {
   out.push(item('Copy', () => c.copy(targets), { icon: <CopyIcon size={12} />, shortcut: 'Ctrl+C' }));
   if (one && one.type === 'dir' && c.hasClipboard) {
     out.push(item('Paste into folder', () => c.paste(one.path), { ...op, icon: <ClipboardIcon size={12} /> }));
+  }
+  const toOther = c.toOther;
+  if (toOther) {
+    out.push(item('Copy to other pane', () => toOther(targets, 'copy'), { ...op, icon: <CopyIcon size={12} />, shortcut: 'F5' }));
+    out.push(item('Move to other pane', () => toOther(targets, 'move'), { ...op, shortcut: 'F6' }));
   }
   out.push(SEP);
   if (one) {

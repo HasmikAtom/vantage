@@ -12,6 +12,8 @@ interface StatusBarProps {
   canControl: boolean;
   onTrash(): void;
   onMore(e: React.MouseEvent<HTMLButtonElement>): void;
+  // Split view: buttons that copy/move the selection to the other pane.
+  toOther?: { arrow: '→' | '←'; target: string; onCopy(): void; onMove(): void };
 }
 
 export function StatusBar(p: StatusBarProps) {
@@ -24,6 +26,28 @@ export function StatusBar(p: StatusBarProps) {
       </span>
       {p.clipboardNote && <span className="rounded bg-muted px-1.5">{p.clipboardNote}</span>}
       <div className="ml-auto flex items-center gap-1">
+        {p.toOther && (
+          <>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={p.selectedCount === 0 || !p.canControl}
+              onClick={p.toOther.onCopy}
+              title={`Copy to other pane (F5) — ${p.toOther.target}`}
+            >
+              Copy {p.toOther.arrow}
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={p.selectedCount === 0 || !p.canControl}
+              onClick={p.toOther.onMove}
+              title={`Move to other pane (F6) — ${p.toOther.target}`}
+            >
+              Move {p.toOther.arrow}
+            </Button>
+          </>
+        )}
         <Button
           size="xs"
           variant="outline"
