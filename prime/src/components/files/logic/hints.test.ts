@@ -49,3 +49,10 @@ describe('SHORTCUT_GROUPS', () => {
     expect(del?.operator).toBe(true);
   });
 });
+
+describe('hintFor — arrow direction', () => {
+  it('points at the other pane', () => {
+    expect(hintFor({ selectedCount: 1, split: true, canControl: true, pane: 'right' })).toContain('F5 copy ← · F6 move ←');
+    expect(hintFor({ selectedCount: 1, split: true, canControl: true, pane: 'left' })).toContain('F5 copy → · F6 move →');
+  });
+});

@@ -170,7 +170,7 @@ export function FilePane(p: FilePaneProps) {
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (p.blocked) return;
     if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]')) return;
-    const s = shortcutFor(e, p.canControl, p.split);
+    const s = shortcutFor(e, p.canControl, p.split, e.target === e.currentTarget);
     if (!s) {
       const ch = typeAheadChar(e);
       if (!ch) return;
@@ -250,6 +250,8 @@ export function FilePane(p: FilePaneProps) {
         break;
       case 'paneForward':
         nav.forward();
+        break;
+      case 'noop':
         break;
     }
   };
@@ -408,7 +410,7 @@ export function FilePane(p: FilePaneProps) {
       {p.showHints && (
         <div className="flex items-center gap-2 border-t px-3 py-1 text-[10px] text-muted-foreground">
           <span className="flex-1 truncate">
-            {hintFor({ selectedCount: selected.length, split: p.split, canControl: p.canControl })}
+            {hintFor({ selectedCount: selected.length, split: p.split, canControl: p.canControl, pane: p.paneId })}
           </span>
           <button
             type="button"

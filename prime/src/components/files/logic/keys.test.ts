@@ -83,18 +83,31 @@ describe('shortcutFor (split mode)', () => {
 
   it('viewer: F5 refreshes (never reloads the page) and F6 does nothing', () => {
     expect(shortcutFor(k('F5'), false, true)).toBe('refresh');
-    expect(shortcutFor(k('F6'), false, true)).toBe(null);
+    expect(shortcutFor(k('F6'), false, true)).toBe('noop');
   });
 });
 
 describe('shortcutFor (single pane keeps v1.2.0 behaviour)', () => {
-  it('F5 refreshes, F6/Tab/Alt+arrows are left to the browser, Ctrl+\\ and ? still work', () => {
+  it('F5 refreshes, F6 is swallowed, Tab/Alt+arrows are left to the browser, Ctrl+\\ and ? still work', () => {
     expect(shortcutFor(k('F5'), true)).toBe('refresh');
-    expect(shortcutFor(k('F6'), true)).toBe(null);
+    expect(shortcutFor(k('F6'), true)).toBe('noop');
     expect(shortcutFor(k('Tab'), true)).toBe(null);
     expect(shortcutFor(k('ArrowLeft', { altKey: true }), true)).toBe(null);
     expect(shortcutFor(k('R', { ctrlKey: true, shiftKey: true }), true)).toBe(null);
     expect(shortcutFor(k('\\', { ctrlKey: true }), true)).toBe('toggleSplit');
     expect(shortcutFor(k('?', { shiftKey: true }), true)).toBe('help');
+  });
+});
+
+describe('shortcutFor — focus and F6', () => {
+  it('Tab switches panes only when the pane itself has focus', () => {
+    expect(shortcutFor(k('Tab'), true, true, true)).toBe('switchPane');
+    expect(shortcutFor(k('Tab'), true, true, false)).toBe(null);
+  });
+
+  it('F6 is always swallowed so the browser never jumps to its address bar', () => {
+    expect(shortcutFor(k('F6'), true, false)).toBe('noop');
+    expect(shortcutFor(k('F6'), false, true)).toBe('noop');
+    expect(shortcutFor(k('F6'), true, true)).toBe('moveOther');
   });
 });

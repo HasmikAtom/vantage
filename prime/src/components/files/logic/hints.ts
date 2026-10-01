@@ -1,7 +1,7 @@
 // Texts for the explorer's hint line, empty states, drop labels and the
 // keyboard shortcut sheet. Viewers never see hints for things they can't do.
 
-export function hintFor(h: { selectedCount: number; split: boolean; canControl: boolean }): string {
+export function hintFor(h: { selectedCount: number; split: boolean; canControl: boolean; pane?: 'left' | 'right' }): string {
   const parts: string[] = [];
   if (!h.canControl) {
     parts.push('Double-click to open', 'Right-click for actions', 'Ctrl+C copy');
@@ -12,7 +12,8 @@ export function hintFor(h: { selectedCount: number; split: boolean; canControl: 
   }
   if (h.split) {
     parts.push('Tab switch pane');
-    if (h.canControl) parts.push('F5 copy →', 'F6 move →');
+    const arrow = h.pane === 'right' ? '←' : '→';
+    if (h.canControl) parts.push(`F5 copy ${arrow}`, `F6 move ${arrow}`);
   }
   parts.push('? shortcuts');
   return parts.join(' · ');

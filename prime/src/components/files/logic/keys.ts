@@ -7,7 +7,9 @@ export type Shortcut =
   | 'paste' | 'newFolder' | 'editAddress' | 'refresh' | 'menu'
   | 'prev' | 'next' | 'first' | 'last'
   | 'copyOther' | 'moveOther' | 'switchPane' | 'toggleSplit' | 'help'
-  | 'paneBack' | 'paneForward';
+  | 'paneBack' | 'paneForward'
+  // Swallowed key: the explorer does nothing, but the browser must not either.
+  | 'noop';
 
 export interface KeyInput {
   key: string;
@@ -24,7 +26,9 @@ const MUTATING: ReadonlySet<Shortcut> = new Set([
 // split: in split view F5/F6 copy/move to the other pane (Total Commander
 // style), Ctrl+Shift+R refreshes, Tab switches pane and Alt+←/→ walk the
 // active pane's own history.
-export function shortcutFor(e: KeyInput, canControl: boolean, split = false): Shortcut | null {
+// focusOnPane: keyboard focus is on the pane itself rather than one of its
+// buttons; Tab only switches panes then, so buttons stay Tab-reachable.
+export function shortcutFor(e: KeyInput, canControl: boolean, split = false, focusOnPane = true): Shortcut | null {
   const mod = e.ctrlKey || e.metaKey;
   if (e.altKey) {
     if (!split || mod || e.shiftKey) return null;
@@ -57,7 +61,7 @@ export function shortcutFor(e: KeyInput, canControl: boolean, split = false): Sh
         s = split ? (canControl ? 'copyOther' : 'refresh') : 'refresh';
         break;
       case 'F6': s = split ? 'moveOther' : null; break;
-      case 'Tab': s = split ? 'switchPane' : null; break;
+      case 'Tab': s = split && focusOnPane ? 'switchPane' : null; break;
       case '?': s = 'help'; break;
       case 'ContextMenu': s = 'menu'; break;
       case 'F10': s = e.shiftKey ? 'menu' : null; break;
@@ -67,7 +71,9 @@ export function shortcutFor(e: KeyInput, canControl: boolean, split = false): Sh
       case 'End': s = 'last'; break;
     }
   }
-  if (s && MUTATING.has(s) && !canControl) return null;
+  if (s && MUTATING.has(s) && !canControl) s = null;
+  // F6 always lands somewhere in the browser (address bar); keep it here.
+  if (s === null && e.key === 'F6' && !mod) return 'noop';
   return s;
 }
 
