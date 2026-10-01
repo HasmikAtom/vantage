@@ -50,7 +50,7 @@ export function useDnd(o: DndOptions) {
         const items = opts.current.dragItems(entry);
         dragging = {
           serverId: opts.current.serverId,
-          items: items.map((x) => ({ path: x.path, isDir: x.type === 'dir', size: x.size })),
+          items: items.map((x) => ({ path: x.path, isDir: x.type === 'dir', size: x.size, type: x.type })),
         };
         e.dataTransfer.setData(VANTAGE_DND_TYPE, JSON.stringify({ serverId: dragging.serverId, paths: dragging.items.map((i) => i.path) }));
         e.dataTransfer.setData('text/plain', dragging.items.map((i) => i.path).join('\n'));

@@ -14,6 +14,8 @@ export interface CrossSource {
   path: string;
   isDir: boolean;
   size: number;
+  // Entry type when known; links and special files are not transferable.
+  type?: FsEntry['type'];
 }
 
 export interface CrossTop {
@@ -62,6 +64,10 @@ export async function planCrossTransfer(
 
   for (const s of sources) {
     const name = baseName(s.path);
+    if (!s.isDir && s.type !== undefined && s.type !== 'file') {
+      plan.skipped.push(s.path);
+      continue;
+    }
     if (!s.isDir) {
       plan.tops.push({ path: s.path, name, isDir: false, dirs: [] });
       addFile({ top: s.path, srcPath: s.path, rel: '', size: s.size });

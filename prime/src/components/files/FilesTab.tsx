@@ -90,7 +90,7 @@ async function copyText(text: string): Promise<void> {
 }
 
 const toClip = (list: readonly FsEntry[]): ClipItem[] =>
-  list.map((e) => ({ path: e.path, isDir: e.type === 'dir', size: e.size }));
+  list.map((e) => ({ path: e.path, isDir: e.type === 'dir', size: e.size, type: e.type }));
 
 const otherOf = (pane: PaneId): PaneId => (pane === 'left' ? 'right' : 'left');
 

@@ -65,3 +65,19 @@ describe('topsToDelete', () => {
     expect(topsToDelete(plan, allDone, new Set(['/src/f.txt']))).toEqual(['/src/logs/old']);
   });
 });
+
+describe('planCrossTransfer — selected links', () => {
+  it('skips a symlink or special file that was selected directly', async () => {
+    const plan = await planCrossTransfer(
+      [
+        { path: '/src/l', isDir: false, size: 5, type: 'symlink' },
+        { path: '/src/sock', isDir: false, size: 0, type: 'other' },
+        { path: '/src/f.txt', isDir: false, size: 3, type: 'file' },
+      ],
+      list,
+    );
+    expect(plan.tops.map((t) => t.path)).toEqual(['/src/f.txt']);
+    expect(plan.files.map((f) => f.srcPath)).toEqual(['/src/f.txt']);
+    expect(plan.skipped).toEqual(['/src/l', '/src/sock']);
+  });
+});

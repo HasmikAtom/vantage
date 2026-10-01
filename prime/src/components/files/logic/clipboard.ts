@@ -1,3 +1,4 @@
+import type { FsEntryType } from '@/types';
 import { baseName, copyName, isSameOrDescendant, joinPath, parentOf } from '../fsPath';
 
 // Vantage-internal clipboard for Cut / Copy / Paste. Not the OS clipboard:
@@ -7,6 +8,7 @@ export interface ClipItem {
   path: string;
   isDir: boolean;
   size: number;
+  type?: FsEntryType;
 }
 
 export interface FsClipboard {
