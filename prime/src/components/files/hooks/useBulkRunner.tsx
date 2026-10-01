@@ -15,10 +15,14 @@ export interface RunBulkOptions {
   // Called when the user presses Cancel (in addition to stopping new items),
   // e.g. to cancel gate transfers that are already running.
   onCancel?: () => void;
+  // Runs after every pass, including a "Retry failed" pass, so callers can
+  // finish work that depends on the outcome (e.g. deleting moved sources).
+  onSettled?: (states: ItemState[]) => void | Promise<void>;
 }
 
 export type RunBulk = (title: string, items: BulkItem[], op: BulkOp, opts?: RunBulkOptions) => Promise<ItemState[]>;
-export type AskConflict = (item: BulkItem) => Promise<{ choice: ConflictChoice; applyToAll: boolean }>;
+// cancelled: the user chose "Cancel all" (or closed the dialog).
+export type AskConflict = (item: BulkItem) => Promise<{ choice: ConflictChoice; applyToAll: boolean; cancelled?: boolean }>;
 
 interface ViewState {
   title: string;
@@ -31,7 +35,7 @@ interface ViewState {
 
 interface PendingConflict {
   item: BulkItem;
-  resolve: (r: { choice: ConflictChoice; applyToAll: boolean }) => void;
+  resolve: (r: { choice: ConflictChoice; applyToAll: boolean; cancelled?: boolean }) => void;
 }
 
 // useBulkRunner owns the progress + conflict dialogs for multi-item work.
@@ -56,7 +60,10 @@ export function useBulkRunner(onRetried: () => void): {
 
   const runBulk = React.useCallback<RunBulk>(
     async (title, items, op, opts = {}) => {
-      if (items.length === 0) return [];
+      if (items.length === 0) {
+        await opts.onSettled?.([]);
+        return [];
+      }
       const run = new BulkRun(
         items,
         op,
@@ -81,6 +88,7 @@ export function useBulkRunner(onRetried: () => void): {
       window.clearTimeout(timer);
       runRef.current = null;
       cancelHook.current = null;
+      await opts.onSettled?.(final);
       const failed = final.some((s) => s.status === 'failed');
       setView((v) => {
         if (!v) return v;
@@ -126,7 +134,7 @@ export function useBulkRunner(onRetried: () => void): {
           }}
           onCancelAll={() => {
             cancel();
-            conflict.resolve({ choice: 'skip', applyToAll: true });
+            conflict.resolve({ choice: 'skip', applyToAll: true, cancelled: true });
             setConflict(null);
           }}
         />

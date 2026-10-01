@@ -171,6 +171,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
   const [showHidden, setShowHidden] = React.useState(false);
   const [sort, setSort] = React.useState<SortSpec>(loadSort);
   const [banner, setBanner] = React.useState<string | null>(null);
+  const [status, setStatus] = React.useState<string | null>(null);
   const [modal, setModal] = React.useState<Modal | null>(null);
   const [menu, setMenu] = React.useState<MenuState | null>(null);
   const [helpOpen, setHelpOpen] = React.useState(false);
@@ -264,6 +265,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     askConflict,
     confirm: (m) => window.confirm(m),
     onError,
+    onStatus: setStatus,
     afterMutation,
   };
 
@@ -525,6 +527,12 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
           >
             ×
           </button>
+        </div>
+      )}
+
+      {status && (
+        <div className="rounded border px-3 py-1.5 text-xs text-muted-foreground" role="status">
+          {status}
         </div>
       )}
 

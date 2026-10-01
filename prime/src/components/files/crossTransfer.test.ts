@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FsEntry, FsEntryType } from '@/types';
-import { BulkRun } from './logic/bulk';
+import { BulkRun, failedItems } from './logic/bulk';
 import type { RunBulk } from './hooks/useBulkRunner';
 import { runCrossTransfer, type CrossApi, type CrossDeps } from './crossTransfer';
 
@@ -16,10 +16,25 @@ const tree: Record<string, FsEntry[]> = {
   '/src/many': Array.from({ length: 1001 }, (_, i) => E(`/src/many/f${i}`)),
 };
 
-const runBulk: RunBulk = (_title, items, op, opts) =>
-  new BulkRun(items, op, { onConflict: () => Promise.reject(new Error('unexpected')), onUpdate: () => {} }, opts?.concurrency ?? 4).start();
+const noConflict = { onConflict: () => Promise.reject(new Error('unexpected')), onUpdate: () => {} };
 
-function setup(opts: { existing?: Record<string, FsEntryType>; failSrc?: string; over?: Partial<CrossDeps> } = {}) {
+// Like useBulkRunner: run, then let the caller finish (onSettled).
+const runBulk: RunBulk = async (_title, items, op, opts) => {
+  const states = await new BulkRun(items, op, noConflict, opts?.concurrency ?? 4).start();
+  await opts?.onSettled?.(states);
+  return states;
+};
+
+// Same, but the user presses "Retry failed" once after the first pass.
+const runBulkWithRetry: RunBulk = async (title, items, op, opts) => {
+  const first = await runBulk(title, items, op, opts);
+  const failed = failedItems(first);
+  if (failed.length > 0) await runBulk(title, failed, op, opts);
+  return first;
+};
+
+function setup(opts: { existing?: Record<string, FsEntryType>; failSrc?: string; failOnce?: string; over?: Partial<CrossDeps> } = {}) {
+  const failedOnce = new Set<string>();
   const calls = {
     mkdir: [] as string[],
     transfers: [] as { srcPath: string; dstPath: string; overwrite: boolean }[],
@@ -42,6 +57,10 @@ function setup(opts: { existing?: Record<string, FsEntryType>; failSrc?: string;
     },
     awaitTransfer: async (id) => {
       if (opts.failSrc && id.endsWith(`|${opts.failSrc}`)) throw new Error('disk full');
+      if (opts.failOnce && id.endsWith(`|${opts.failOnce}`) && !failedOnce.has(opts.failOnce)) {
+        failedOnce.add(opts.failOnce);
+        throw new Error('network blip');
+      }
     },
     cancelTransfer: async () => {},
     trash: async (_s, p) => { calls.trash.push(p); },
@@ -141,5 +160,61 @@ describe('runCrossTransfer', () => {
     const { d, calls } = setup();
     await runCrossTransfer(d, { serverId: A, items: [{ path: '/nope', isDir: true, size: 0 }] }, { serverId: B, dir: '/dst' }, 'copy');
     expect(calls.errors[0]).toMatch(/Could not read/);
+  });
+});
+
+describe('runCrossTransfer — review fixes', () => {
+  const two = [
+    { path: '/src/f.txt', isDir: false, size: 3 },
+    { path: '/src/g.txt', isDir: false, size: 1 },
+  ];
+
+  it('"Cancel all" in the conflict prompt stops the whole run', async () => {
+    const { d, calls } = setup({
+      existing: { 'f.txt': 'file' },
+      over: { askConflict: async () => ({ choice: 'skip', applyToAll: true, cancelled: true }) },
+    });
+    await runCrossTransfer(d, { serverId: A, items: two }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.transfers).toEqual([]);
+    expect(calls.trash).toEqual([]);
+    expect(calls.mkdir).toEqual([]);
+  });
+
+  it('a successful retry completes the move', async () => {
+    const { d, calls } = setup({ failOnce: '/src/logs/old/b.log', over: { runBulk: runBulkWithRetry } });
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.trash).toEqual(['/src/logs']);
+  });
+
+  it('reports every problem of a run in one message', async () => {
+    const { d, calls } = setup();
+    await runCrossTransfer(d, { serverId: A, items: [{ path: '/src/withlink', isDir: true, size: 0 }] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.errors).toHaveLength(1);
+    expect(calls.errors[0]).toMatch(/skipped/);
+    expect(calls.errors[0]).toMatch(/kept at the source/);
+  });
+
+  it('refuses to start while another cross-server run is still going', async () => {
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const slow = setup();
+    slow.d.api.awaitTransfer = () => hold;
+    const first = runCrossTransfer(slow.d, { serverId: A, items: [two[0]!] }, { serverId: B, dir: '/dst' }, 'copy');
+    await new Promise((r) => setTimeout(r, 10));
+    const second = setup();
+    await runCrossTransfer(second.d, { serverId: A, items: [two[1]!] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(second.calls.transfers).toEqual([]);
+    expect(second.calls.errors[0]).toMatch(/already running/);
+    release();
+    await first;
+  });
+
+  it('shows scan progress while walking folders, then clears it', async () => {
+    const statuses: (string | null)[] = [];
+    const { d } = setup({ over: { onStatus: (s) => statuses.push(s) } });
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(statuses[0]).toMatch(/Scanning/);
+    expect(statuses.some((s) => s !== null && /2 folders/.test(s))).toBe(true);
+    expect(statuses[statuses.length - 1]).toBe(null);
   });
 });

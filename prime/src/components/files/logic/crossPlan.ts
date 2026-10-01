@@ -50,7 +50,9 @@ export async function planCrossTransfer(
   sources: readonly CrossSource[],
   list: Lister,
   max = CROSS_MAX_FILES,
+  onDir?: (scanned: number) => void,
 ): Promise<CrossPlan> {
+  let scanned = 0;
   const plan: CrossPlan = { tops: [], files: [], totalBytes: 0, skipped: [] };
   const addFile = (f: CrossFile) => {
     if (plan.files.length >= max) throw new TooManyFilesError(max);
@@ -71,6 +73,7 @@ export async function planCrossTransfer(
     while (queue.length > 0) {
       const rel = queue.shift()!;
       const entries = await list(rel ? joinPath(s.path, rel) : s.path);
+      onDir?.(++scanned);
       for (const e of entries) {
         const childRel = rel ? `${rel}/${e.name}` : e.name;
         if (e.type === 'dir') {

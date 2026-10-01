@@ -53,7 +53,10 @@ export interface CrossDeps {
   runBulk: RunBulk;
   askConflict: AskConflict;
   confirm(message: string): boolean;
+  // One call per run with every problem joined, so nothing is overwritten.
   onError(message: string): void;
+  // Progress while source folders are scanned; null when scanning is over.
+  onStatus?: (message: string | null) => void;
   afterMutation(serverId: string, dirs: readonly string[]): Promise<void>;
 }
 
@@ -67,21 +70,56 @@ async function mkdirOk(api: CrossApi, serverId: string, path: string): Promise<v
   }
 }
 
+// One cross-server run at a time: a second F5/F6/drop while the first is
+// still scanning or copying would fight over the progress dialog.
+let active = false;
+
 export async function runCrossTransfer(
   d: CrossDeps,
   src: { serverId: string; items: readonly CrossSource[] },
   dst: { serverId: string; dir: string },
   mode: 'copy' | 'move',
 ): Promise<void> {
+  if (active) {
+    d.onError('Another cross-server copy is already running — wait for it to finish.');
+    return;
+  }
+  active = true;
+  try {
+    await crossRun(d, src, dst, mode);
+  } finally {
+    active = false;
+    d.onStatus?.(null);
+  }
+}
+
+async function crossRun(
+  d: CrossDeps,
+  src: { serverId: string; items: readonly CrossSource[] },
+  dst: { serverId: string; dir: string },
+  mode: 'copy' | 'move',
+): Promise<void> {
   const verb = mode === 'copy' ? 'Copy' : 'Move';
+  const notes: string[] = [];
+  const flush = () => {
+    if (notes.length > 0) d.onError(notes.join(' · '));
+    notes.length = 0;
+  };
 
   let plan: CrossPlan;
+  d.onStatus?.('Scanning folders…');
   try {
-    plan = await planCrossTransfer(src.items, (p) => d.api.list(src.serverId, p));
+    plan = await planCrossTransfer(
+      src.items,
+      (p) => d.api.list(src.serverId, p),
+      undefined,
+      (n) => d.onStatus?.(`Scanning folders… ${n} ${n === 1 ? 'folder' : 'folders'}`),
+    );
   } catch (e) {
     d.onError(e instanceof TooManyFilesError ? e.message : `Could not read the source folders: ${msg(e)}`);
     return;
   }
+  d.onStatus?.(null);
   if (
     plan.files.length > CROSS_CONFIRM_FILES &&
     !d.confirm(`${verb} ${plan.files.length.toLocaleString('en-US')} files (${formatBytes(plan.totalBytes)}) to another server?`)
@@ -105,6 +143,10 @@ export async function runCrossTransfer(
     let choice = sticky;
     if (!choice) {
       const a = await d.askConflict({ id: t.path, label: t.name });
+      if (a.cancelled) {
+        d.onError(`${verb} cancelled — nothing was changed.`);
+        return;
+      }
       choice = a.choice;
       if (a.applyToAll) sticky = a.choice;
     }
@@ -112,7 +154,7 @@ export async function runCrossTransfer(
       kept.add(t.path);
     } else if (choice === 'replace') {
       if (t.isDir || there === 'dir') {
-        d.onError(`${t.name}: folders can't be replaced — choose Keep both or Skip`);
+        notes.push(`${t.name}: folders can't be replaced — choose Keep both or Skip`);
         kept.add(t.path);
       } else {
         target.set(t.path, { name: t.name, overwrite: true });
@@ -132,17 +174,47 @@ export async function runCrossTransfer(
     try {
       for (const rel of ['', ...t.dirs]) await mkdirOk(d.api, dst.serverId, joinRel(root, rel));
     } catch (e) {
-      d.onError(`Could not create ${tgt.name} on the destination: ${msg(e)}`);
+      notes.push(`Could not create ${tgt.name} on the destination: ${msg(e)}`);
       target.delete(t.path);
       kept.add(t.path);
     }
   }
 
+  // Finishing step: runs after the first pass and again after every
+  // "Retry failed", so a retried move still removes its sources.
+  const done = new Set<string>();
+  const trashed = new Set<string>();
+  const settle = async () => {
+    if (plan.skipped.length > 0) {
+      notes.push(
+        `${plan.skipped.length} link(s) or special file(s) skipped: ${plan.skipped.slice(0, 3).map(baseName).join(', ')}${plan.skipped.length > 3 ? '…' : ''}`,
+      );
+    }
+    if (mode === 'move') {
+      for (const p of topsToDelete(plan, done, kept)) {
+        if (trashed.has(p)) continue;
+        try {
+          await d.api.trash(src.serverId, p);
+          trashed.add(p);
+        } catch (e) {
+          notes.push(`Copied, but could not remove ${baseName(p)} from the source: ${msg(e)}`);
+        }
+      }
+      const keptCount = plan.tops.length - trashed.size;
+      if (keptCount > 0) {
+        notes.push(`${keptCount} ${keptCount === 1 ? 'item was' : 'items were'} kept at the source because not everything was moved`);
+      }
+      await d.afterMutation(src.serverId, [...new Set(plan.tops.map((t) => parentOf(t.path)))]);
+    }
+    await d.afterMutation(dst.serverId, [dst.dir]);
+    flush();
+  };
+
   // One transfer per file, two at a time.
   const files = plan.files.filter((f) => target.has(f.top));
   const byId = new Map(files.map((f) => [f.srcPath, f]));
   const running = new Set<string>();
-  const states = await d.runBulk(
+  await d.runBulk(
     `${mode === 'copy' ? 'Copying' : 'Moving'} ${files.length} ${files.length === 1 ? 'file' : 'files'} to another server`,
     files.map((f) => ({ id: f.srcPath, label: f.rel ? `${baseName(f.top)}/${f.rel}` : baseName(f.top) })),
     async (item) => {
@@ -159,6 +231,7 @@ export async function runCrossTransfer(
       running.add(id);
       try {
         await d.api.awaitTransfer(id);
+        done.add(item.id);
       } finally {
         running.delete(id);
       }
@@ -168,28 +241,7 @@ export async function runCrossTransfer(
       onCancel: () => {
         for (const id of running) void d.api.cancelTransfer(id).catch(() => {});
       },
+      onSettled: settle,
     },
   );
-
-  if (plan.skipped.length > 0) {
-    d.onError(`${plan.skipped.length} link(s) or special file(s) skipped: ${plan.skipped.slice(0, 3).map(baseName).join(', ')}${plan.skipped.length > 3 ? '…' : ''}`);
-  }
-
-  if (mode === 'move') {
-    const done = new Set(states.filter((s) => s.status === 'done').map((s) => s.item.id));
-    const del = topsToDelete(plan, done, kept);
-    for (const p of del) {
-      try {
-        await d.api.trash(src.serverId, p);
-      } catch (e) {
-        d.onError(`Copied, but could not remove ${baseName(p)} from the source: ${msg(e)}`);
-      }
-    }
-    const keptCount = plan.tops.length - del.length;
-    if (keptCount > 0) {
-      d.onError(`${keptCount} ${keptCount === 1 ? 'item was' : 'items were'} kept at the source because not everything was moved`);
-    }
-    await d.afterMutation(src.serverId, [...new Set(plan.tops.map((t) => parentOf(t.path)))]);
-  }
-  await d.afterMutation(dst.serverId, [dst.dir]);
 }
