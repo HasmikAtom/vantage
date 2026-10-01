@@ -17,6 +17,8 @@ interface AddressBarProps {
   validate(path: string): Promise<string | null>;
   editSignal: number;
   onToggleSidebar?: () => void;
+  // Split view: the pane's server picker, rendered at the start of the bar.
+  serverPicker?: React.ReactNode;
   dropPropsFor?: (dir: string) => ElProps;
   dropTarget?: string | null;
 }
@@ -63,6 +65,7 @@ export function AddressBar(p: AddressBarProps) {
 
   return (
     <div className="flex items-center gap-1 border-b bg-muted/30 px-2 py-1.5">
+      {p.serverPicker}
       {p.onToggleSidebar && (
         <Button size="xs" variant="ghost" className="md:hidden" onClick={p.onToggleSidebar} title="Folders">
           <MenuIcon size={12} />

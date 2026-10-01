@@ -1,42 +1,46 @@
 import * as React from 'react';
 import type { FsEntry } from '@/types';
-import { ApiError, type TransferProgress } from '@/api';
+import type { ServerSummary, TransferProgress } from '@/api';
 import { useCan } from '@/auth';
 import { cn } from '@/lib/utils';
-import { Button, Card } from '@/components/ui/primitives';
+import { Card } from '@/components/ui/primitives';
 import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
 import { SectionHeader } from '@/components/SectionHeader';
-import { AddressBar } from './AddressBar';
+import { FilePane, type PaneCommand, type PaneId } from './FilePane';
 import { Sidebar } from './Sidebar';
-import { usePins } from './hooks/usePins';
-import { addPin } from './logic/pins';
-import { FileList } from './FileList';
-import { StatusBar } from './StatusBar';
-import { Toolbar } from './Toolbar';
-import { EDITOR_MAX_BYTES, parentOf } from './fsPath';
+import { EDITOR_MAX_BYTES, ROOT } from './fsPath';
 import { backgroundMenu, itemMenu, type MenuCtx } from './menus';
 import { useFileActions } from './useFileActions';
 import { collectDropped } from './dropUpload';
 import { installFileDropGuard } from './dropGuard';
-import { PIN_TARGET, useDnd } from './useDnd';
+import { PIN_TARGET, useDnd, type DropSource } from './useDnd';
+import { defaultCrossApi, runCrossTransfer, type CrossDeps } from './crossTransfer';
 import { useBulkRunner } from './hooks/useBulkRunner';
 import { useClipboard } from './hooks/useClipboard';
-import { fetchListing, invalidateListings, useDirListing } from './hooks/useDirListing';
-import { useDirSizes } from './hooks/useDirSizes';
+import { fetchListing, invalidateListings } from './hooks/useDirListing';
+import { useMediaQuery } from './hooks/useMediaQuery';
+import { useMemoryNav } from './hooks/useMemoryNav';
 import { useNavHistory } from './hooks/useNavHistory';
-import { shortcutFor, typeAheadChar } from './logic/keys';
-import { emptySelection, findTypeAhead, selectionReducer } from './logic/selection';
-import { DEFAULT_SORT, filterEntries, parseSort, sortEntries, toggleSort, type SortSpec } from './logic/sort';
+import { usePins } from './hooks/usePins';
+import type { ClipItem } from './logic/clipboard';
+import type { PaneNav } from './logic/paneHistory';
+import { addPin } from './logic/pins';
+import { DEFAULT_SORT, parseSort, type SortSpec } from './logic/sort';
+import { parseFilesHash, splitHashFor, type FilesHash } from './logic/splitHash';
+import { planToOther } from './logic/toOther';
 import { planUploadTree, type UploadPlan } from './logic/upload';
 import { NewFolderModal, RenameModal } from './dialogs/NameModals';
 import { CopyMoveModal } from './dialogs/CopyMoveModal';
 import { FileEditor } from './dialogs/FileEditor';
 import { PermsModal } from './dialogs/PermsModal';
 import { SendToModal } from './dialogs/SendToModal';
+import { ShortcutSheet } from './dialogs/ShortcutSheet';
 import { TransferFooter } from './dialogs/TransferFooter';
 import { TrashModal } from './dialogs/TrashModal';
 
-// FilesTab — desktop-style file explorer over one server's host filesystem.
+// FilesTab — the explorer shell. It renders one FilePane, or two side by
+// side in split view, and owns everything the panes share: the sidebar,
+// clipboard, dialogs, context menu, bulk runner, transfers and the URL.
 //
 // Paths are HOST-relative (/etc/hosts); the outpost maps them through
 // /hostfs. The outpost enforces roles; canControl/canAdmin only grey out
@@ -44,22 +48,24 @@ import { TrashModal } from './dialogs/TrashModal';
 
 interface FilesTabProps {
   serverId: string;
+  servers: readonly ServerSummary[];
+  onSelectServer(id: string): void;
 }
 
 type Modal =
-  | { kind: 'new'; what: 'folder' | 'file'; parent: string }
-  | { kind: 'rename'; entry: FsEntry }
-  | { kind: 'copyMove'; entry: FsEntry; mode: 'copy' | 'move' }
-  | { kind: 'edit'; entry: FsEntry }
-  | { kind: 'sendTo'; entry: FsEntry }
-  | { kind: 'perms'; entry: FsEntry }
-  | { kind: 'trashBin' };
+  | { kind: 'new'; pane: PaneId; what: 'folder' | 'file'; parent: string }
+  | { kind: 'rename'; pane: PaneId; entry: FsEntry }
+  | { kind: 'copyMove'; pane: PaneId; entry: FsEntry; mode: 'copy' | 'move' }
+  | { kind: 'edit'; pane: PaneId; entry: FsEntry }
+  | { kind: 'sendTo'; pane: PaneId; entry: FsEntry }
+  | { kind: 'perms'; pane: PaneId; entry: FsEntry }
+  | { kind: 'trashBin'; pane: PaneId };
 
 interface MenuState {
   x: number;
   y: number;
   targets: FsEntry[];
-  dir: string;
+  pane: PaneId;
 }
 
 const SORT_STORAGE_KEY = 'vantage.files.sort';
@@ -82,42 +88,96 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-function listingError(err: unknown): string {
-  if (err instanceof ApiError && err.status === 403) return 'Protected path — your role or the outpost denylist blocks it.';
-  if (err instanceof ApiError && err.status === 404) return 'Folder no longer exists.';
-  return err instanceof Error ? err.message : String(err);
-}
+const toClip = (list: readonly FsEntry[]): ClipItem[] =>
+  list.map((e) => ({ path: e.path, isDir: e.type === 'dir', size: e.size }));
 
-function rowFor(path: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`);
-}
+const otherOf = (pane: PaneId): PaneId => (pane === 'left' ? 'right' : 'left');
 
-export function FilesTab({ serverId }: FilesTabProps) {
+export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
   const canControl = useCan('operator');
   const canAdmin = useCan('admin');
-  const nav = useNavHistory();
-  const { data, loading, error, reload } = useDirListing(serverId, nav.path);
+  const wide = useMediaQuery('(min-width: 768px)');
+
+  // --- panes, servers, navigation -------------------------------------------
+  const [initial] = React.useState<FilesHash>(
+    () => parseFilesHash(window.location.hash) ?? { mode: 'single', path: ROOT },
+  );
+  const leftStart = initial.mode === 'split' ? initial.left : initial.path;
+  const [split, setSplit] = React.useState(initial.mode === 'split');
+  const [active, setActive] = React.useState<PaneId>('left');
+  const [rightServerId, setRightServerId] = React.useState(
+    initial.mode === 'split' ? initial.rightServer : serverId,
+  );
+  const browserNav = useNavHistory({ enabled: !split, initialPath: leftStart });
+  const leftMem = useMemoryNav(leftStart);
+  const rightMem = useMemoryNav(initial.mode === 'split' ? initial.right : leftStart);
+
+  const navOf = (pane: PaneId): PaneNav => (pane === 'right' ? rightMem : split ? leftMem : browserNav);
+  const serverOf = (pane: PaneId): string => (pane === 'right' ? rightServerId : serverId);
+  const activePane: PaneId = split ? active : 'left';
+  const activeServer = serverOf(activePane);
+  const activeNav = navOf(activePane);
+  const serverName = (id: string) => servers.find((s) => s.id === id)?.name ?? id;
+  const leftRoot = React.useRef<HTMLDivElement>(null);
+  const rightRoot = React.useRef<HTMLDivElement>(null);
+  const rootOf = (pane: PaneId) => (pane === 'left' ? leftRoot : rightRoot);
+
+  // Split view keeps both panes in the URL (no history entries).
+  React.useEffect(() => {
+    if (!split) return;
+    window.history.replaceState(window.history.state, '', splitHashFor(leftMem.path, rightServerId, rightMem.path));
+  }, [split, leftMem.path, rightServerId, rightMem.path]);
+
+  // The right pane's server was removed in Settings: fall back.
+  const resetRight = rightMem.reset;
+  React.useEffect(() => {
+    if (servers.length > 0 && !servers.some((s) => s.id === rightServerId)) {
+      setRightServerId(serverId);
+      resetRight(ROOT);
+    }
+  }, [servers, rightServerId, serverId, resetRight]);
+
+  const toggleSplit = () => {
+    if (!split) {
+      if (!wide) return;
+      const here = browserNav.path;
+      leftMem.reset(here);
+      rightMem.reset(here);
+      setRightServerId(serverId);
+      setActive('left');
+      setSplit(true);
+      return;
+    }
+    // Leaving split keeps the active pane as the single pane.
+    const keepPath = navOf(activePane).path;
+    const keepServer = serverOf(activePane);
+    if (keepServer !== serverId) onSelectServer(keepServer);
+    browserNav.reset(keepPath);
+    setActive('left');
+    setSplit(false);
+  };
+
+  // --- shared state -----------------------------------------------------------
   const clipboard = useClipboard();
-  const { pins, save: savePins, error: pinsError } = usePins(serverId);
+  const { pins, save: savePins, error: pinsError } = usePins(activeServer);
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  const [showHidden, setShowHidden] = React.useState(false);
+  const [sort, setSort] = React.useState<SortSpec>(loadSort);
+  const [banner, setBanner] = React.useState<string | null>(null);
+  const [modal, setModal] = React.useState<Modal | null>(null);
+  const [menu, setMenu] = React.useState<MenuState | null>(null);
+  const [helpOpen, setHelpOpen] = React.useState(false);
+  const [transfers, setTransfers] = React.useState<Record<string, TransferProgress>>({});
+  const [mutationKey, setMutationKey] = React.useState(0);
+  const uploadFilesRef = React.useRef<HTMLInputElement>(null);
+  const uploadFolderRef = React.useRef<HTMLInputElement>(null);
+  const uploadTarget = React.useRef<PaneId>('left');
+  const activeRef = React.useRef(activePane);
+  activeRef.current = activePane;
 
   React.useEffect(() => {
     if (pinsError) setBanner(`Pins: ${pinsError}`);
   }, [pinsError]);
-
-  const [showHidden, setShowHidden] = React.useState(false);
-  const [query, setQuery] = React.useState('');
-  const [sort, setSort] = React.useState<SortSpec>(loadSort);
-  const [sizesKey, setSizesKey] = React.useState(0);
-  const [banner, setBanner] = React.useState<string | null>(null);
-  const [modal, setModal] = React.useState<Modal | null>(null);
-  const [menu, setMenu] = React.useState<MenuState | null>(null);
-  const [transfers, setTransfers] = React.useState<Record<string, TransferProgress>>({});
-  const [editAddress, setEditAddress] = React.useState(0);
-  const rootRef = React.useRef<HTMLDivElement>(null);
-  const uploadFilesRef = React.useRef<HTMLInputElement>(null);
-  const uploadFolderRef = React.useRef<HTMLInputElement>(null);
-  const typeAhead = React.useRef({ buf: '', at: 0 });
 
   React.useEffect(() => {
     try {
@@ -133,45 +193,22 @@ export function FilesTab({ serverId }: FilesTabProps) {
 
   React.useEffect(() => installFileDropGuard(window), []);
 
-  // --- listing, sizes, ordering -------------------------------------------
-  const entries = React.useMemo(() => data?.entries ?? [], [data]);
-  const dirPaths = React.useMemo(() => entries.filter((e) => e.type === 'dir').map((e) => e.path), [entries]);
-  const sizes = useDirSizes(serverId, nav.path, dirPaths, sizesKey);
-  const visible = React.useMemo(
-    () => sortEntries(filterEntries(entries, { showHidden, query }), sort, sizes),
-    [entries, showHidden, query, sort, sizes],
-  );
-  const order = React.useMemo(() => visible.map((e) => e.path), [visible]);
-  const byPath = React.useMemo(() => new Map(visible.map((e) => [e.path, e])), [visible]);
-
-  // --- selection ------------------------------------------------------------
-  const [sel, dispatch] = React.useReducer(selectionReducer, emptySelection);
-  const selected = React.useMemo(() => visible.filter((e) => sel.selected.has(e.path)), [visible, sel.selected]);
-
   React.useEffect(() => {
-    dispatch({ type: 'clear' });
-    setQuery('');
-    setMenu(null);
     setSidebarOpen(false);
-  }, [nav.path, serverId]);
-
-  React.useEffect(() => {
-    dispatch({ type: 'retain', existing: new Set(order) });
-  }, [order]);
-
-  React.useEffect(() => {
-    if (sel.focus) rowFor(sel.focus)?.scrollIntoView({ block: 'nearest' });
-  }, [sel.focus]);
+  }, [activeNav.path, activeServer]);
 
   // --- mutations ------------------------------------------------------------
+  const bump = React.useCallback(() => setMutationKey((k) => k + 1), []);
   const afterMutation = React.useCallback(
-    async (dirs: readonly string[]) => {
-      invalidateListings(serverId, dirs);
-      setSizesKey((k) => k + 1);
-      await reload();
+    async (sid: string, dirs: readonly string[]) => {
+      invalidateListings(sid, dirs);
+      bump();
     },
-    [serverId, reload],
+    [bump],
   );
+  const leftAfter = React.useCallback((dirs: readonly string[]) => afterMutation(serverId, dirs), [afterMutation, serverId]);
+  const rightAfter = React.useCallback((dirs: readonly string[]) => afterMutation(rightServerId, dirs), [afterMutation, rightServerId]);
+  const refreshAll = React.useCallback(async () => bump(), [bump]);
 
   const upsertTransfer = React.useCallback((p: TransferProgress) => {
     setTransfers((prev) => ({ ...prev, [p.id]: p }));
@@ -184,66 +221,99 @@ export function FilesTab({ serverId }: FilesTabProps) {
     });
   }, []);
 
-  // TransferFooter rows keep one SSE stream each and list this callback in
-  // their effect deps; a stable identity keeps path changes from reopening
-  // every stream, while the ref still refreshes the current folder.
-  const refreshCurrentRef = React.useRef<() => Promise<void>>(async () => {});
-  React.useEffect(() => {
-    refreshCurrentRef.current = () => afterMutation([nav.path]);
-  });
-  const refreshCurrent = React.useCallback(() => refreshCurrentRef.current(), []);
-
-  const { runBulk, dialogs: bulkDialogs } = useBulkRunner(React.useCallback(() => void refreshCurrent(), [refreshCurrent]));
+  const { runBulk, askConflict, dialogs: bulkDialogs } = useBulkRunner(bump);
   const onError = React.useCallback((m: string) => setBanner(m), []);
-  const actions = useFileActions({ serverId, runBulk, afterMutation, onError, onTransferStarted: upsertTransfer });
-  const dnd = useDnd({
-    serverId,
-    canControl,
-    dragItems: (entry) => (sel.selected.has(entry.path) ? selected : [entry]),
-    onDropItems: (src, dir, mode) =>
-      void actions.transfer(src.items.map((i) => ({ path: i.path, isDir: i.isDir })), dir, mode),
-    onExternalDrop: (dt, dir) => {
-      collectDropped(dt).then(
-        (plan) => void actions.upload(plan, dir),
-        (e: unknown) => setBanner(`Could not read the dropped items: ${e instanceof Error ? e.message : String(e)}`),
-      );
-    },
-    onPinDrop: (dirs) => void savePins(dirs.reduce(addPin, pins)),
-  });
+  const leftActions = useFileActions({ serverId, runBulk, afterMutation: leftAfter, onError, onTransferStarted: upsertTransfer });
+  const rightActions = useFileActions({ serverId: rightServerId, runBulk, afterMutation: rightAfter, onError, onTransferStarted: upsertTransfer });
+  const actionsOf = (pane: PaneId) => (pane === 'right' ? rightActions : leftActions);
+
+  const crossDeps: CrossDeps = {
+    api: defaultCrossApi,
+    runBulk,
+    askConflict,
+    confirm: (m) => window.confirm(m),
+    onError,
+    afterMutation,
+  };
 
   // --- commands ---------------------------------------------------------------
-  const open = React.useCallback(
-    (e: FsEntry) => {
-      if (e.type === 'dir') {
-        nav.go(e.path);
-      } else if (e.type === 'symlink') {
-        fetchListing(serverId, e.path).then(
-          () => nav.go(e.path),
-          () => !e.broken && setModal({ kind: 'edit', entry: e }),
-        );
-      } else if (e.type === 'file') {
-        if (e.size <= EDITOR_MAX_BYTES) setModal({ kind: 'edit', entry: e });
-        else actions.download([e]);
-      }
-    },
-    [nav, serverId, actions],
-  );
+  const moveItems = (src: DropSource, dstPane: PaneId, dir: string, mode: 'copy' | 'move') => {
+    const dstServer = serverOf(dstPane);
+    if (src.serverId === dstServer) {
+      void actionsOf(dstPane).transfer(src.items.map((i) => ({ path: i.path, isDir: i.isDir })), dir, mode);
+    } else {
+      void runCrossTransfer(crossDeps, src, { serverId: dstServer, dir }, mode);
+    }
+  };
 
-  const toClipboard = (list: readonly FsEntry[], mode: 'copy' | 'cut') => {
-    if (list.length === 0) return;
-    clipboard.set({
-      serverId,
-      mode,
-      items: list.map((e) => ({ path: e.path, isDir: e.type === 'dir', size: e.size })),
+  const toOther = (pane: PaneId, entries: FsEntry[], mode: 'copy' | 'move') => {
+    if (!split || entries.length === 0) return;
+    const dst = otherOf(pane);
+    const srcAt = { serverId: serverOf(pane), dir: navOf(pane).path };
+    const dstAt = { serverId: serverOf(dst), dir: navOf(dst).path };
+    switch (planToOther(srcAt, dstAt, mode)) {
+      case 'copy-in-place':
+        void actionsOf(pane).paste({ serverId: srcAt.serverId, mode: 'copy', items: toClip(entries) }, srcAt.dir);
+        break;
+      case 'refuse-same-folder':
+        setBanner('Already in this folder — both panes show the same place.');
+        break;
+      default:
+        moveItems({ serverId: srcAt.serverId, items: toClip(entries) }, dst, dstAt.dir, mode);
+    }
+  };
+
+  const pasteInto = (pane: PaneId, dir: string) => {
+    const c = clipboard.current;
+    if (!c) return;
+    if (c.serverId === serverOf(pane)) {
+      void actionsOf(pane).paste(c, dir);
+      return;
+    }
+    void runCrossTransfer(
+      crossDeps,
+      { serverId: c.serverId, items: c.items },
+      { serverId: serverOf(pane), dir },
+      c.mode === 'cut' ? 'move' : 'copy',
+    ).then(() => {
+      if (c.mode === 'cut') clipboard.set(null);
     });
   };
 
-  const confirmTrash = (list: readonly FsEntry[]) => {
+  const externalDrop = (pane: PaneId, dt: DataTransfer, dir: string) => {
+    collectDropped(dt).then(
+      (plan) => void actionsOf(pane).upload(plan, dir),
+      (e: unknown) => setBanner(`Could not read the dropped items: ${e instanceof Error ? e.message : String(e)}`),
+    );
+  };
+
+  const openEntry = (pane: PaneId, e: FsEntry) => {
+    const nav = navOf(pane);
+    if (e.type === 'dir') {
+      nav.go(e.path);
+    } else if (e.type === 'symlink') {
+      fetchListing(serverOf(pane), e.path).then(
+        () => nav.go(e.path),
+        () => {
+          if (!e.broken) setModal({ kind: 'edit', pane, entry: e });
+        },
+      );
+    } else if (e.type === 'file') {
+      if (e.size <= EDITOR_MAX_BYTES) setModal({ kind: 'edit', pane, entry: e });
+      else actionsOf(pane).download([e]);
+    }
+  };
+
+  const confirmTrash = (pane: PaneId, list: readonly FsEntry[]) => {
     if (list.length === 0) return;
     const q = list.length === 1 ? `Move "${list[0]!.name}" to trash?` : `Move ${list.length} items to trash?`;
     if (!window.confirm(q)) return;
-    dispatch({ type: 'clear' });
-    void actions.trash(list);
+    void actionsOf(pane).trash(list);
+  };
+
+  const startUpload = (pane: PaneId, folder: boolean) => {
+    uploadTarget.current = pane;
+    (folder ? uploadFolderRef : uploadFilesRef).current?.click();
   };
 
   const uploadFromInput = (files: FileList | null, folder: boolean) => {
@@ -252,187 +322,161 @@ export function FilesTab({ serverId }: FilesTabProps) {
     const plan: UploadPlan = folder
       ? planUploadTree(list.map((f) => ({ relPath: f.webkitRelativePath || f.name, file: f })))
       : { dirs: [], files: list.map((file) => ({ relDir: '', file })) };
-    void actions.upload(plan, nav.path);
+    const pane = uploadTarget.current;
+    void actionsOf(pane).upload(plan, navOf(pane).path);
   };
 
-  const menuCtx: MenuCtx = {
-    canControl,
-    canAdmin,
-    hasClipboard: clipboard.current !== null,
-    showHidden,
-    open,
-    edit: (e) => setModal({ kind: 'edit', entry: e }),
-    download: (list) => actions.download(list),
-    cut: (list) => toClipboard(list, 'cut'),
-    copy: (list) => toClipboard(list, 'copy'),
-    paste: (dir) => {
-      const c = clipboard.current;
-      if (c) void actions.paste(c, dir);
-    },
-    rename: (e) => setModal({ kind: 'rename', entry: e }),
-    copyTo: (e) => setModal({ kind: 'copyMove', entry: e, mode: 'copy' }),
-    moveTo: (e) => setModal({ kind: 'copyMove', entry: e, mode: 'move' }),
-    copyPath: (e) => void copyText(e.path),
-    pin: (e) => void savePins(addPin(pins, e.path)),
-    sendTo: (e) => setModal({ kind: 'sendTo', entry: e }),
-    perms: (e) => setModal({ kind: 'perms', entry: e }),
-    trash: confirmTrash,
-    newItem: (what, dir) => setModal({ kind: 'new', what, parent: dir }),
-    uploadFiles: () => uploadFilesRef.current?.click(),
-    uploadFolder: () => uploadFolderRef.current?.click(),
-    refresh: () => void afterMutation([nav.path]),
-    toggleHidden: () => setShowHidden((v) => !v),
-    openTrashBin: () => setModal({ kind: 'trashBin' }),
+  const menuCtxFor = (pane: PaneId): MenuCtx => {
+    const a = actionsOf(pane);
+    const sid = serverOf(pane);
+    return {
+      canControl,
+      canAdmin,
+      hasClipboard: clipboard.current !== null,
+      showHidden,
+      open: (e) => openEntry(pane, e),
+      edit: (e) => setModal({ kind: 'edit', pane, entry: e }),
+      download: (list) => a.download(list),
+      cut: (list) => clipboard.set({ serverId: sid, mode: 'cut', items: toClip(list) }),
+      copy: (list) => clipboard.set({ serverId: sid, mode: 'copy', items: toClip(list) }),
+      paste: (dir) => pasteInto(pane, dir),
+      rename: (e) => setModal({ kind: 'rename', pane, entry: e }),
+      copyTo: (e) => setModal({ kind: 'copyMove', pane, entry: e, mode: 'copy' }),
+      moveTo: (e) => setModal({ kind: 'copyMove', pane, entry: e, mode: 'move' }),
+      copyPath: (e) => void copyText(e.path),
+      pin: (e) => void savePins(addPin(pins, e.path)),
+      sendTo: (e) => setModal({ kind: 'sendTo', pane, entry: e }),
+      perms: (e) => setModal({ kind: 'perms', pane, entry: e }),
+      trash: (list) => confirmTrash(pane, list),
+      newItem: (what, dir) => setModal({ kind: 'new', pane, what, parent: dir }),
+      uploadFiles: () => startUpload(pane, false),
+      uploadFolder: () => startUpload(pane, true),
+      refresh: () => void afterMutation(sid, [navOf(pane).path]),
+      toggleHidden: () => setShowHidden((v) => !v),
+      openTrashBin: () => setModal({ kind: 'trashBin', pane }),
+    };
   };
 
-  const openMenu = (x: number, y: number, entry: FsEntry | null) => {
-    if (entry && !sel.selected.has(entry.path)) {
-      dispatch({ type: 'click', path: entry.path, ctrl: false, shift: false, order });
+  const handleCommand = (pane: PaneId, c: PaneCommand) => {
+    switch (c.type) {
+      case 'open':
+        openEntry(pane, c.entry);
+        break;
+      case 'menu':
+        setMenu({ x: c.x, y: c.y, targets: c.targets, pane });
+        break;
+      case 'trash':
+        confirmTrash(pane, c.entries);
+        break;
+      case 'rename':
+        setModal({ kind: 'rename', pane, entry: c.entry });
+        break;
+      case 'newItem':
+        setModal({ kind: 'new', pane, what: c.what, parent: navOf(pane).path });
+        break;
+      case 'upload':
+        startUpload(pane, c.folder);
+        break;
+      case 'clipboard':
+        clipboard.set({ serverId: serverOf(pane), mode: c.mode, items: toClip(c.entries) });
+        break;
+      case 'clearCut':
+        if (clipboard.current?.mode === 'cut') clipboard.set(null);
+        break;
+      case 'paste':
+        pasteInto(pane, navOf(pane).path);
+        break;
+      case 'toOther':
+        toOther(pane, c.entries, c.mode);
+        break;
+      case 'toggleSplit':
+        toggleSplit();
+        break;
+      case 'switchPane':
+        if (split) {
+          const next = otherOf(pane);
+          setActive(next);
+          rootOf(next).current?.focus();
+        }
+        break;
+      case 'help':
+        setHelpOpen(true);
+        break;
     }
-    const targets = entry ? (sel.selected.has(entry.path) ? selected : [entry]) : [];
-    setMenu({ x, y, targets, dir: nav.path });
   };
+
   const closeMenu = React.useCallback(() => {
     setMenu(null);
-    rootRef.current?.focus();
+    (activeRef.current === 'right' ? rightRoot : leftRoot).current?.focus();
   }, []);
   const menuItems: MenuEntry[] = menu
     ? menu.targets.length > 0
-      ? itemMenu(menu.targets, menuCtx)
-      : backgroundMenu(menu.dir, menuCtx)
+      ? itemMenu(menu.targets, menuCtxFor(menu.pane))
+      : backgroundMenu(navOf(menu.pane).path, menuCtxFor(menu.pane))
     : [];
 
-  const validatePath = React.useCallback(
-    async (p: string) => {
-      try {
-        await fetchListing(serverId, p, true);
-        return null;
-      } catch (e) {
-        return listingError(e);
-      }
-    },
-    [serverId],
+  // Drops on the sidebar act on the active pane's server.
+  const sidebarDnd = useDnd({
+    serverId: activeServer,
+    canControl,
+    dragItems: () => [],
+    onDropItems: (src, dir, mode) => moveItems(src, activeRef.current, dir, mode),
+    onExternalDrop: (dt, dir) => externalDrop(activeRef.current, dt, dir),
+    onPinDrop: (dirs) => void savePins(dirs.reduce(addPin, pins)),
+  });
+
+  const renderPane = (pane: PaneId) => (
+    <FilePane
+      key={pane}
+      paneId={pane}
+      serverId={serverOf(pane)}
+      servers={servers}
+      onServerChange={(id) => {
+        if (pane === 'left') {
+          onSelectServer(id);
+        } else {
+          setRightServerId(id);
+          rightMem.reset(ROOT);
+        }
+      }}
+      nav={navOf(pane)}
+      split={split}
+      canSplit={wide}
+      active={activePane === pane}
+      onActivate={() => setActive(pane)}
+      rootRef={rootOf(pane)}
+      canControl={canControl}
+      showHidden={showHidden}
+      onShowHidden={setShowHidden}
+      sort={sort}
+      onSort={setSort}
+      mutationKey={mutationKey}
+      clipboard={clipboard.current}
+      blocked={modal !== null || menu !== null || helpOpen}
+      onDropItems={(src, dir, mode) => moveItems(src, pane, dir, mode)}
+      onExternalDrop={(dt, dir) => externalDrop(pane, dt, dir)}
+      onCommand={(c) => handleCommand(pane, c)}
+      onToggleSidebar={() => setSidebarOpen((v) => !v)}
+    />
   );
-
-  // --- keyboard ---------------------------------------------------------------
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (modal || menu) return;
-    if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]')) return;
-    const s = shortcutFor(e, canControl);
-    if (!s) {
-      const ch = typeAheadChar(e);
-      if (!ch) return;
-      const ta = typeAhead.current;
-      const now = Date.now();
-      ta.buf = now - ta.at > 700 ? ch : ta.buf + ch;
-      ta.at = now;
-      const hit = findTypeAhead(visible, ta.buf, sel.focus);
-      if (hit) dispatch({ type: 'click', path: hit, ctrl: false, shift: false, order });
-      return;
-    }
-    e.preventDefault();
-    const focused = sel.focus ? byPath.get(sel.focus) : undefined;
-    switch (s) {
-      case 'prev':
-      case 'next':
-      case 'first':
-      case 'last':
-        dispatch({ type: 'move', to: s, extend: e.shiftKey, order });
-        break;
-      case 'open':
-        if (focused) open(focused);
-        break;
-      case 'up':
-        if (nav.path !== '/') nav.go(parentOf(nav.path));
-        break;
-      case 'trash':
-        confirmTrash(selected);
-        break;
-      case 'rename':
-        if (selected.length === 1) setModal({ kind: 'rename', entry: selected[0]! });
-        break;
-      case 'selectAll':
-        dispatch({ type: 'selectAll', order });
-        break;
-      case 'escape':
-        if (sel.selected.size > 0) dispatch({ type: 'clear' });
-        else if (clipboard.current?.mode === 'cut') clipboard.set(null);
-        break;
-      case 'copy':
-        toClipboard(selected, 'copy');
-        break;
-      case 'cut':
-        toClipboard(selected, 'cut');
-        break;
-      case 'paste':
-        menuCtx.paste(nav.path);
-        break;
-      case 'newFolder':
-        setModal({ kind: 'new', what: 'folder', parent: nav.path });
-        break;
-      case 'editAddress':
-        setEditAddress((n) => n + 1);
-        break;
-      case 'refresh':
-        menuCtx.refresh();
-        break;
-      case 'menu': {
-        const anchor = (sel.focus && rowFor(sel.focus)) || e.currentTarget;
-        const r = anchor.getBoundingClientRect();
-        setMenu({ x: r.left + 48, y: r.top + r.height / 2, targets: selected, dir: nav.path });
-        break;
-      }
-    }
-  };
-
-  // --- derived display ---------------------------------------------------------
-  const selectionSize = React.useMemo(() => {
-    let bytes = 0;
-    let unknown = false;
-    for (const e of selected) {
-      if (e.type !== 'dir') {
-        bytes += e.size;
-        continue;
-      }
-      const s = sizes.get(e.path);
-      if (s?.state === 'done') {
-        bytes += s.bytes;
-        if (s.partial) unknown = true;
-      } else {
-        unknown = true;
-      }
-    }
-    return { bytes, unknown };
-  }, [selected, sizes]);
-
-  const clip = clipboard.current;
-  const cutPaths = React.useMemo(
-    () =>
-      clip && clip.mode === 'cut' && clip.serverId === serverId
-        ? new Set(clip.items.map((i) => i.path))
-        : new Set<string>(),
-    [clip, serverId],
-  );
-  const clipboardNote = clip ? `${clip.items.length} ${clip.mode === 'cut' ? 'cut' : 'copied'}` : null;
-
-  const errorNode = error ? (
-    <div className="space-y-2 p-4 text-xs">
-      <div className="text-destructive">{listingError(error)}</div>
-      <div className="flex gap-2">
-        <Button size="xs" variant="outline" onClick={() => void reload()}>Retry</Button>
-        {nav.path !== '/' && (
-          <Button size="xs" variant="outline" onClick={() => nav.go(parentOf(nav.path))}>Go up</Button>
-        )}
-      </div>
-    </div>
-  ) : null;
 
   return (
     <div className="space-y-3">
-      <SectionHeader
-        label="Files"
-        count={loading && !data ? 'loading…' : data ? `${visible.length} items` : ''}
-      />
+      <SectionHeader label="Files" count={split ? 'split view' : undefined} />
+
+      {banner && (
+        <div className="flex items-start justify-between gap-2 rounded border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
+          <span>{banner}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={() => setBanner(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         <div className="flex min-h-[420px]">
@@ -448,106 +492,49 @@ export function FilesTab({ serverId }: FilesTabProps) {
             )}
           >
             <Sidebar
-              serverId={serverId}
-              currentPath={nav.path}
+              serverId={activeServer}
+              currentPath={activeNav.path}
               showHidden={showHidden}
-              refreshKey={sizesKey}
+              refreshKey={mutationKey}
               pins={pins}
               onPinsChange={(next) => void savePins(next)}
-              onNavigate={(p) => {
+              onNavigate={(path) => {
                 setSidebarOpen(false);
-                nav.go(p);
+                activeNav.go(path);
               }}
-              dropPropsFor={dnd.dropPropsFor}
-              pinDropProps={dnd.pinDropProps}
-              dropTarget={dnd.dropTarget}
-              pinDropActive={dnd.dropTarget === PIN_TARGET}
+              dropPropsFor={sidebarDnd.dropPropsFor}
+              pinDropProps={sidebarDnd.pinDropProps}
+              dropTarget={sidebarDnd.dropTarget}
+              pinDropActive={sidebarDnd.dropTarget === PIN_TARGET}
             />
           </aside>
-          <div
-            ref={rootRef}
-            tabIndex={0}
-            onKeyDown={onKeyDown}
-            className="flex min-w-0 flex-1 flex-col outline-none"
-          >
-            <AddressBar
-              path={nav.path}
-              canBack={nav.canBack}
-              canForward={nav.canForward}
-              onBack={nav.back}
-              onForward={nav.forward}
-              onUp={() => nav.go(parentOf(nav.path))}
-              onRefresh={menuCtx.refresh}
-              onNavigate={nav.go}
-              validate={validatePath}
-              editSignal={editAddress}
-              onToggleSidebar={() => setSidebarOpen((v) => !v)}
-              dropPropsFor={dnd.dropPropsFor}
-              dropTarget={dnd.dropTarget}
-            />
-            <Toolbar
-              canControl={canControl}
-              query={query}
-              onQuery={setQuery}
-              showHidden={showHidden}
-              onShowHidden={setShowHidden}
-              onNew={(what) => menuCtx.newItem(what, nav.path)}
-              onUploadFiles={menuCtx.uploadFiles}
-              onUploadFolder={menuCtx.uploadFolder}
-            />
-            {banner && (
-              <div className="flex items-start justify-between gap-2 border-b bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
-                <span>{banner}</span>
-                <button
-                  type="button"
-                  aria-label="Dismiss"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => setBanner(null)}
-                >
-                  ×
-                </button>
+          {split && !wide ? (
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex border-b text-xs" role="tablist">
+                {(['left', 'right'] as const).map((pane) => (
+                  <button
+                    key={pane}
+                    type="button"
+                    role="tab"
+                    aria-selected={activePane === pane}
+                    onClick={() => setActive(pane)}
+                    className={cn(
+                      'flex-1 truncate px-2 py-1.5',
+                      activePane === pane ? 'border-b-2 border-primary font-semibold' : 'text-muted-foreground',
+                    )}
+                  >
+                    {pane === 'left' ? 'Left' : 'Right'} · {serverName(serverOf(pane))}
+                  </button>
+                ))}
               </div>
-            )}
-            <FileList
-              entries={visible}
-              showParent={nav.path !== '/'}
-              selection={sel}
-              sizes={sizes}
-              sort={sort}
-              cutPaths={cutPaths}
-              loading={loading}
-              error={errorNode}
-              onSort={(k) => setSort((s) => toggleSort(s, k))}
-              onRowClick={(ev, entry) =>
-                dispatch({ type: 'click', path: entry.path, ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey, order })
-              }
-              onRowCheck={(entry) => dispatch({ type: 'toggle', path: entry.path })}
-              onToggleAll={() =>
-                dispatch(sel.selected.size > 0 && sel.selected.size === order.length ? { type: 'clear' } : { type: 'selectAll', order })
-              }
-              onOpen={open}
-              onUp={() => nav.go(parentOf(nav.path))}
-              onContextMenu={(ev, entry) => openMenu(ev.clientX, ev.clientY, entry)}
-              onBackgroundClick={() => dispatch({ type: 'clear' })}
-              dragPropsFor={dnd.dragPropsFor}
-              dropPropsFor={dnd.dropPropsFor}
-              dropTarget={dnd.dropTarget}
-              currentDir={nav.path}
-            />
-            <StatusBar
-              count={visible.length}
-              selectedCount={selected.length}
-              selectedBytes={selectionSize.bytes}
-              sizeUnknown={selectionSize.unknown}
-              clipboardNote={clipboardNote}
-              canControl={canControl}
-              onTrash={() => confirmTrash(selected)}
-              onMore={(ev) => {
-                const r = ev.currentTarget.getBoundingClientRect();
-                setMenu({ x: r.left, y: r.bottom + 4, targets: selected, dir: nav.path });
-              }}
-            />
-          </div>
+              {renderPane(activePane)}
+            </div>
+          ) : (
+            <>
+              {renderPane('left')}
+              {split && renderPane('right')}
+            </>
+          )}
         </div>
       </Card>
 
@@ -579,7 +566,7 @@ export function FilesTab({ serverId }: FilesTabProps) {
           onCancel={() => setModal(null)}
           onSubmit={(name) => {
             setModal(null);
-            void actions.create(modal.parent, name, modal.what);
+            void actionsOf(modal.pane).create(modal.parent, name, modal.what);
           }}
         />
       )}
@@ -589,8 +576,7 @@ export function FilesTab({ serverId }: FilesTabProps) {
           onCancel={() => setModal(null)}
           onSubmit={(name) => {
             setModal(null);
-            dispatch({ type: 'clear' });
-            void actions.rename(modal.entry, name);
+            void actionsOf(modal.pane).rename(modal.entry, name);
           }}
         />
       )}
@@ -601,25 +587,25 @@ export function FilesTab({ serverId }: FilesTabProps) {
           onCancel={() => setModal(null)}
           onSubmit={(dst, overwrite) => {
             setModal(null);
-            void actions.copyOrMoveTo(modal.entry, dst, modal.mode, overwrite);
+            void actionsOf(modal.pane).copyOrMoveTo(modal.entry, dst, modal.mode, overwrite);
           }}
         />
       )}
       {modal?.kind === 'edit' && (
         <FileEditor
-          serverId={serverId}
+          serverId={serverOf(modal.pane)}
           entry={modal.entry}
           canSave={canControl}
           onClose={() => setModal(null)}
           onSaved={() => {
             setModal(null);
-            void refreshCurrent();
+            bump();
           }}
         />
       )}
       {modal?.kind === 'sendTo' && (
         <SendToModal
-          sourceServerId={serverId}
+          sourceServerId={serverOf(modal.pane)}
           entry={modal.entry}
           canPreserveOwnership={canAdmin}
           onCancel={() => setModal(null)}
@@ -630,19 +616,20 @@ export function FilesTab({ serverId }: FilesTabProps) {
         />
       )}
       {modal?.kind === 'trashBin' && (
-        <TrashModal serverId={serverId} canAdmin={canAdmin} onClose={() => setModal(null)} onRestored={refreshCurrent} />
+        <TrashModal serverId={serverOf(modal.pane)} canAdmin={canAdmin} onClose={() => setModal(null)} onRestored={refreshAll} />
       )}
       {modal?.kind === 'perms' && (
         <PermsModal
-          serverId={serverId}
+          serverId={serverOf(modal.pane)}
           entry={modal.entry}
           onCancel={() => setModal(null)}
           onSaved={async () => {
             setModal(null);
-            await refreshCurrent();
+            bump();
           }}
         />
       )}
+      {helpOpen && <ShortcutSheet canControl={canControl} onClose={() => setHelpOpen(false)} />}
 
       {bulkDialogs}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}
@@ -651,7 +638,7 @@ export function FilesTab({ serverId }: FilesTabProps) {
         transfers={transfers}
         onUpdate={upsertTransfer}
         onDismiss={dismissTransfer}
-        onRefreshSource={refreshCurrent}
+        onRefreshSource={refreshAll}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Button, Input } from '@/components/ui/primitives';
 import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
-import { FileTextIcon, FolderIcon, UploadIcon } from '@/components/ui/icons';
+import { ColumnsIcon, FileTextIcon, FolderIcon, UploadIcon } from '@/components/ui/icons';
 
 interface ToolbarProps {
   canControl: boolean;
@@ -12,6 +12,10 @@ interface ToolbarProps {
   onNew(what: 'folder' | 'file'): void;
   onUploadFiles(): void;
   onUploadFolder(): void;
+  split: boolean;
+  canSplit: boolean;
+  onToggleSplit(): void;
+  onHelp(): void;
 }
 
 export function Toolbar(p: ToolbarProps) {
@@ -54,6 +58,20 @@ export function Toolbar(p: ToolbarProps) {
         <UploadIcon size={11} /> Upload ▾
       </Button>
       <div className="ml-auto flex items-center gap-2">
+        {(p.canSplit || p.split) && (
+          <Button
+            size="xs"
+            variant={p.split ? 'secondary' : 'ghost'}
+            aria-pressed={p.split}
+            onClick={p.onToggleSplit}
+            title="Split view (Ctrl+\)"
+          >
+            <ColumnsIcon size={12} />
+          </Button>
+        )}
+        <Button size="xs" variant="ghost" onClick={p.onHelp} title="Keyboard shortcuts (?)">
+          ?
+        </Button>
         <Input
           value={p.query}
           onChange={(e) => p.onQuery(e.target.value)}

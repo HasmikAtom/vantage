@@ -487,3 +487,7 @@ export const DatabaseIcon = (p: IconProps) => (
 export const DiscIcon = (p: IconProps) => (
   <Icon {...p} paths={<><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2" /></>} />
 );
+
+export const ColumnsIcon = (p: IconProps) => (
+  <Icon {...p} paths={<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 4v16" /></>} />
+);

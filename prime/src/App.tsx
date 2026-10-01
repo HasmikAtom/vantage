@@ -410,7 +410,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
           </TabsContent>
           <TabsContent value="files" className="mt-0">
             <React.Suspense fallback={<TabLoading />}>
-              <FilesTab serverId={activeServerId} />
+              <FilesTab serverId={activeServerId} servers={servers} onSelectServer={setActiveServerId} />
             </React.Suspense>
           </TabsContent>
         </main>
