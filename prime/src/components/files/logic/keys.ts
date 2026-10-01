@@ -5,7 +5,9 @@
 export type Shortcut =
   | 'open' | 'up' | 'trash' | 'rename' | 'selectAll' | 'escape' | 'copy' | 'cut'
   | 'paste' | 'newFolder' | 'editAddress' | 'refresh' | 'menu'
-  | 'prev' | 'next' | 'first' | 'last';
+  | 'prev' | 'next' | 'first' | 'last'
+  | 'copyOther' | 'moveOther' | 'switchPane' | 'toggleSplit' | 'help'
+  | 'paneBack' | 'paneForward';
 
 export interface KeyInput {
   key: string;
@@ -15,20 +17,33 @@ export interface KeyInput {
   altKey: boolean;
 }
 
-const MUTATING: ReadonlySet<Shortcut> = new Set(['trash', 'rename', 'cut', 'paste', 'newFolder']);
+const MUTATING: ReadonlySet<Shortcut> = new Set([
+  'trash', 'rename', 'cut', 'paste', 'newFolder', 'copyOther', 'moveOther',
+]);
 
-export function shortcutFor(e: KeyInput, canControl: boolean): Shortcut | null {
-  if (e.altKey) return null;
+// split: in split view F5/F6 copy/move to the other pane (Total Commander
+// style), Ctrl+Shift+R refreshes, Tab switches pane and Alt+←/→ walk the
+// active pane's own history.
+export function shortcutFor(e: KeyInput, canControl: boolean, split = false): Shortcut | null {
+  const mod = e.ctrlKey || e.metaKey;
+  if (e.altKey) {
+    if (!split || mod || e.shiftKey) return null;
+    if (e.key === 'ArrowLeft') return 'paneBack';
+    if (e.key === 'ArrowRight') return 'paneForward';
+    return null;
+  }
   let s: Shortcut | null = null;
-  if (e.ctrlKey || e.metaKey) {
+  if (mod) {
     const key = e.key.toLowerCase();
     if (e.shiftKey) {
       if (key === 'n') s = 'newFolder';
+      else if (key === 'r' && split) s = 'refresh';
     } else if (key === 'a') s = 'selectAll';
     else if (key === 'c') s = 'copy';
     else if (key === 'x') s = 'cut';
     else if (key === 'v') s = 'paste';
     else if (key === 'l') s = 'editAddress';
+    else if (key === '\\') s = 'toggleSplit';
   } else {
     switch (e.key) {
       case 'Enter': s = 'open'; break;
@@ -36,7 +51,14 @@ export function shortcutFor(e: KeyInput, canControl: boolean): Shortcut | null {
       case 'Delete': s = 'trash'; break;
       case 'F2': s = 'rename'; break;
       case 'Escape': s = 'escape'; break;
-      case 'F5': s = 'refresh'; break;
+      case 'F5':
+        // A viewer's F5 in split mode still refreshes the pane rather than
+        // falling through to a full browser reload.
+        s = split ? (canControl ? 'copyOther' : 'refresh') : 'refresh';
+        break;
+      case 'F6': s = split ? 'moveOther' : null; break;
+      case 'Tab': s = split ? 'switchPane' : null; break;
+      case '?': s = 'help'; break;
       case 'ContextMenu': s = 'menu'; break;
       case 'F10': s = e.shiftKey ? 'menu' : null; break;
       case 'ArrowUp': s = 'prev'; break;

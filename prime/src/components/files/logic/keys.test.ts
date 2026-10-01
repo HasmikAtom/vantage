@@ -65,3 +65,36 @@ describe('typeAheadChar', () => {
     expect(typeAheadChar(k('a', { ctrlKey: true }))).toBe(null);
   });
 });
+
+describe('shortcutFor (split mode)', () => {
+  it.each([
+    [k('F5'), 'copyOther'],
+    [k('F6'), 'moveOther'],
+    [k('R', { ctrlKey: true, shiftKey: true }), 'refresh'],
+    [k('Tab'), 'switchPane'],
+    [k('Tab', { shiftKey: true }), 'switchPane'],
+    [k('ArrowLeft', { altKey: true }), 'paneBack'],
+    [k('ArrowRight', { altKey: true }), 'paneForward'],
+    [k('\\', { ctrlKey: true }), 'toggleSplit'],
+    [k('?', { shiftKey: true }), 'help'],
+  ] as const)('%o → %s', (input, want) => {
+    expect(shortcutFor(input, true, true)).toBe(want);
+  });
+
+  it('viewer: F5 refreshes (never reloads the page) and F6 does nothing', () => {
+    expect(shortcutFor(k('F5'), false, true)).toBe('refresh');
+    expect(shortcutFor(k('F6'), false, true)).toBe(null);
+  });
+});
+
+describe('shortcutFor (single pane keeps v1.2.0 behaviour)', () => {
+  it('F5 refreshes, F6/Tab/Alt+arrows are left to the browser, Ctrl+\\ and ? still work', () => {
+    expect(shortcutFor(k('F5'), true)).toBe('refresh');
+    expect(shortcutFor(k('F6'), true)).toBe(null);
+    expect(shortcutFor(k('Tab'), true)).toBe(null);
+    expect(shortcutFor(k('ArrowLeft', { altKey: true }), true)).toBe(null);
+    expect(shortcutFor(k('R', { ctrlKey: true, shiftKey: true }), true)).toBe(null);
+    expect(shortcutFor(k('\\', { ctrlKey: true }), true)).toBe('toggleSplit');
+    expect(shortcutFor(k('?', { shiftKey: true }), true)).toBe('help');
+  });
+});
