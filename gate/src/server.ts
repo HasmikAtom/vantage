@@ -20,7 +20,7 @@ import {
   writeAudit,
   type AuditStatus,
 } from './audit.js';
-import { cancelTransfer, createTransfer, streamTransfer } from './transfer.js';
+import { cancelTransfer, createTransfer, getTransferStatus, streamTransfer } from './transfer.js';
 import {
   addWhitelist,
   ensureWhitelistSchema,
@@ -426,6 +426,7 @@ viewerApi.put('/pins/:serverId', async (c) => {
 // and moving it here would change the layer at which the 403 is produced
 // without changing the observable response shape. Out of scope.
 viewerApi.post('/transfer', (c) => createTransfer(c, c.get('user')));
+viewerApi.get('/transfer/:id', (c) => getTransferStatus(c, c.get('user')));
 viewerApi.get('/transfer/:id/stream', (c) => streamTransfer(c, c.get('user')));
 viewerApi.delete('/transfer/:id', (c) => cancelTransfer(c, c.get('user')));
 

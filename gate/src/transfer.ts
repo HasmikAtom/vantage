@@ -31,6 +31,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Context } from 'hono';
 import { getServerToken } from './registry.js';
+import { snapshotFor, snapshotOf } from './transferSnapshot.js';
 import { assertSafeURL, isBlockedIP, resolveHostnamesToIPs, validateAndResolve } from './net-policy.js';
 
 export type TransferMode = 'move' | 'copy';
@@ -145,13 +146,7 @@ const subscribers = new Map<string, Set<(event: string) => void>>();
 function notify(state: TransferState): void {
   const subs = subscribers.get(state.id);
   if (!subs || subs.size === 0) return;
-  const payload = JSON.stringify({
-    id: state.id,
-    bytesTotal: state.bytesTotal,
-    bytesDone: state.bytesDone,
-    status: state.status,
-    error: state.error,
-  });
+  const payload = JSON.stringify(snapshotOf(state));
   const line = `data: ${payload}\n\n`;
   for (const send of subs) {
     try {
@@ -655,13 +650,7 @@ export function streamTransfer(c: Context, user: AuthedUser): Response {
       const enc = new TextEncoder();
       send = (line: string) => controller.enqueue(enc.encode(line));
       // Immediately push a snapshot so the SPA gets initial state.
-      send(`data: ${JSON.stringify({
-        id: state.id,
-        bytesTotal: state.bytesTotal,
-        bytesDone: state.bytesDone,
-        status: state.status,
-        error: state.error,
-      })}\n\n`);
+      send(`data: ${JSON.stringify(snapshotOf(state))}\n\n`);
       const set = subscribers.get(id) ?? new Set();
       set.add(send);
       subscribers.set(id, set);
@@ -703,4 +692,14 @@ export function cancelTransfer(c: Context, user: AuthedUser): Response {
   state.endedAt = Date.now();
   notify(state);
   return c.json({ ok: true });
+}
+
+// GET /api/transfer/:id — one-shot status, for callers that poll instead
+// of holding an SSE stream open (the explorer's cross-server copies: many
+// concurrent streams can exhaust the browser's per-origin connections).
+export function getTransferStatus(c: Context, user: AuthedUser): Response {
+  sweep();
+  const snap = snapshotFor(transfers, c.req.param('id') ?? '', user.id);
+  if (!snap) return c.json({ error: 'unknown transfer' }, 404);
+  return c.json(snap);
 }
