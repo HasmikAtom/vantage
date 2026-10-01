@@ -8,6 +8,7 @@ import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
 import { SectionHeader } from '@/components/SectionHeader';
 import { FilePane, type PaneCommand, type PaneId } from './FilePane';
 import { Sidebar } from './Sidebar';
+import { useSidebarWidth } from './hooks/useSidebarWidth';
 import { EDITOR_MAX_BYTES, ROOT } from './fsPath';
 import { backgroundMenu, itemMenu, type MenuCtx } from './menus';
 import { useFileActions } from './useFileActions';
@@ -166,6 +167,8 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
   const clipboard = useClipboard();
   const { pins, save: savePins, error: pinsError } = usePins(activeServer);
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  const bodyRef = React.useRef<HTMLDivElement>(null);
+  const sidebar = useSidebarWidth(bodyRef, split);
   const [showHidden, setShowHidden] = React.useState(false);
   const [sort, setSort] = React.useState<SortSpec>(loadSort);
   const [banner, setBanner] = React.useState<string | null>(null);
@@ -567,15 +570,19 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
       )}
 
       <Card className="overflow-hidden">
-        <div className="flex min-h-[420px]">
+        <div
+          ref={bodyRef}
+          className="flex min-h-[420px]"
+          style={{ '--files-sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
+        >
           {sidebarOpen && (
             <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />
           )}
           <aside
             className={cn(
-              'w-56 shrink-0 border-r bg-muted/10',
+              'w-56 shrink-0 overflow-hidden border-r bg-muted/10 md:w-[var(--files-sidebar-w)]',
               sidebarOpen
-                ? 'fixed inset-y-0 left-0 z-40 block w-64 bg-background shadow-xl md:static md:z-auto md:w-56 md:bg-muted/10 md:shadow-none'
+                ? 'fixed inset-y-0 left-0 z-40 block w-64 bg-background shadow-xl md:static md:z-auto md:bg-muted/10 md:shadow-none'
                 : 'hidden md:block',
             )}
           >
@@ -596,6 +603,15 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
               pinDropActive={sidebarDnd.dropTarget === PIN_TARGET}
             />
           </aside>
+          {/* Resize handle: sits over the sidebar's border, desktop only. */}
+          <div
+            {...sidebar.handleProps}
+            className={cn(
+              'relative z-10 -ml-[3px] hidden w-[5px] shrink-0 cursor-col-resize touch-none outline-none transition-colors md:block',
+              'hover:bg-primary/30 focus-visible:bg-primary/40',
+              sidebar.dragging && 'bg-primary/50',
+            )}
+          />
           {split && !wide ? (
             <div className="flex min-w-0 flex-1 flex-col">
               <div className="flex border-b text-xs" role="tablist">
