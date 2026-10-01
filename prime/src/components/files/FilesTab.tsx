@@ -21,13 +21,14 @@ import { fetchListing, invalidateListings } from './hooks/useDirListing';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { useMemoryNav } from './hooks/useMemoryNav';
 import { useNavHistory } from './hooks/useNavHistory';
+import { useSplitUrl } from './hooks/useSplitUrl';
 import { usePins } from './hooks/usePins';
 import { clipboardAfterMove, clipboardStore, type ClipItem } from './logic/clipboard';
 import type { PaneNav } from './logic/paneHistory';
 import { addPin } from './logic/pins';
 import { dropLabel } from './logic/hints';
 import { DEFAULT_SORT, parseSort, type SortSpec } from './logic/sort';
-import { parseFilesHash, restoreSplitHash, splitHashFor, type FilesHash } from './logic/splitHash';
+import { parseFilesHash, type FilesHash } from './logic/splitHash';
 import { planToOther } from './logic/toOther';
 import { planUploadTree, type UploadPlan } from './logic/upload';
 import { NewFolderModal, RenameModal } from './dialogs/NameModals';
@@ -123,23 +124,8 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
   const rightRoot = React.useRef<HTMLDivElement>(null);
   const rootOf = (pane: PaneId) => (pane === 'left' ? leftRoot : rightRoot);
 
-  // Split view keeps both panes in the URL (no history entries).
-  React.useEffect(() => {
-    if (!split) return;
-    window.history.replaceState(window.history.state, '', splitHashFor(leftMem.path, rightServerId, rightMem.path));
-  }, [split, leftMem.path, rightServerId, rightMem.path]);
-
-  // Browser Back/Forward in split view: keep the panes and put the split
-  // hash back on whatever older Files entry the browser landed on.
-  React.useEffect(() => {
-    if (!split) return;
-    const onPop = () => {
-      const h = restoreSplitHash(window.location.hash, leftMem.path, rightServerId, rightMem.path);
-      if (h) window.history.replaceState(window.history.state, '', h);
-    };
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, [split, leftMem.path, rightServerId, rightMem.path]);
+  // Split view keeps both panes in the URL and survives browser Back/Forward.
+  useSplitUrl(split, leftMem.path, rightServerId, rightMem.path);
 
   // The right pane's server was removed in Settings: fall back.
   const resetRight = rightMem.reset;
