@@ -140,14 +140,15 @@ export const AppHeader = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+        {/* Status and clock stacked, small: the dot sits beside the first line
+            and the clock lines up under its text. */}
+        <div className="grid grid-cols-[auto_1fr] items-center gap-x-1.5 gap-y-0.5 font-mono text-[10px] leading-tight text-muted-foreground">
           <StatusDot status="healthy" pulse />
-          All systems healthy · uptime {system.uptimeText}
+          <span className="whitespace-nowrap">All systems healthy · uptime {system.uptimeText}</span>
+          <span className="col-start-2 whitespace-nowrap text-foreground/80">{system.timeText}</span>
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="font-mono text-xs">{system.timeText}</span>
-          <Separator orientation="vertical" className="h-5" />
           <span
             className="font-mono text-[11px] text-muted-foreground max-w-[180px] truncate"
             title={userEmail}
