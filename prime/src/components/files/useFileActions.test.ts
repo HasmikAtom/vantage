@@ -52,3 +52,21 @@ describe('paste of a cut', () => {
     expect(clipboardStore.get()).toBeNull();
   });
 });
+
+describe('bulk actions report a crash instead of rejecting', () => {
+  it('trash, transfer, paste and upload turn a thrown error into onError', async () => {
+    const errors: string[] = [];
+    const a = createFileActions({
+      serverId: 's1',
+      runBulk: async () => { throw new Error('runner blew up'); },
+      afterMutation: async () => {},
+      onError: (m) => errors.push(m),
+    });
+    const entry = { name: 'x', path: '/a/x', type: 'file' as const, size: 1, mode: 0o644, mtime: '' };
+    await expect(a.trash([entry as never])).resolves.toBeUndefined();
+    await expect(a.transfer([{ path: '/a/x', isDir: false }], '/b', 'copy')).resolves.toBeUndefined();
+    await expect(a.paste(cut, '/b')).resolves.toBeUndefined();
+    await expect(a.upload({ dirs: [], files: [{ relDir: '', file: new File(['1'], 'f') }] } as never, '/b')).resolves.toBeUndefined();
+    expect(errors).toEqual(Array(4).fill('runner blew up'));
+  });
+});

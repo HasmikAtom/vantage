@@ -91,7 +91,7 @@ export function createFileActions(d: FileActionsDeps): FileActions {
     return states;
   };
 
-  return {
+  const actions: FileActions = {
     async trash(entries) {
       await runBulk(
         `Moving ${plural(entries.length, 'item')} to trash`,
@@ -206,6 +206,25 @@ export function createFileActions(d: FileActionsDeps): FileActions {
         onError(msg(e));
       }
     },
+  };
+
+  // Callers start these and don't wait; a crash (e.g. in the bulk runner)
+  // must reach the user as a message, not vanish as an unhandled rejection.
+  const guard =
+    <A extends unknown[]>(f: (...a: A) => Promise<void>) =>
+    async (...a: A) => {
+      try {
+        await f(...a);
+      } catch (e) {
+        onError(msg(e));
+      }
+    };
+  return {
+    ...actions,
+    trash: guard(actions.trash),
+    transfer: guard(actions.transfer),
+    paste: guard(actions.paste),
+    upload: guard(actions.upload),
   };
 }
 
