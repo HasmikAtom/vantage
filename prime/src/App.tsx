@@ -330,8 +330,9 @@ function Dashboard({ userEmail }: { userEmail: string }) {
             onSelectServer={setActiveServerId}
           />
           <div className="border-b bg-card">
-            <div className="flex items-center justify-between px-8 py-2">
-              <TabsList className="bg-transparent p-0 gap-0.5">
+            {/* Slim tab bar: !h-7 beats the shared TabsList's h-9. */}
+            <div className="flex items-center justify-between px-8 py-1">
+              <TabsList className="!h-7 bg-transparent p-0 gap-0.5">
                 <TabsTrigger value="overview" className="data-[state=active]:bg-muted gap-1.5">
                   <ActivityIcon size={13} />
                   Overview
