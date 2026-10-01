@@ -200,8 +200,8 @@ export function FilesTab({ serverId }: FilesTabProps) {
     serverId,
     canControl,
     dragItems: (entry) => (sel.selected.has(entry.path) ? selected : [entry]),
-    onInternalDrop: (paths, dir, mode) =>
-      void actions.transfer(paths.map((p) => ({ path: p, isDir: byPath.get(p)?.type === 'dir' })), dir, mode),
+    onDropItems: (src, dir, mode) =>
+      void actions.transfer(src.items.map((i) => ({ path: i.path, isDir: i.isDir })), dir, mode),
     onExternalDrop: (dt, dir) => {
       collectDropped(dt).then(
         (plan) => void actions.upload(plan, dir),

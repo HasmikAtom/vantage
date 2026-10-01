@@ -1,27 +1,43 @@
 import * as React from 'react';
 import type { FsEntry } from '@/types';
 import type { ElProps } from './FileList';
-import { VANTAGE_DND_TYPE, canDropInto, dropMode } from './logic/dnd';
+import type { ClipItem } from './logic/clipboard';
+import { VANTAGE_DND_TYPE, canDropAcross, crossDropMode } from './logic/dnd';
 
 // Sentinel dropTarget value for the sidebar's "Pinned" heading.
 export const PIN_TARGET = '\u0000pins';
 
+export interface DropSource {
+  serverId: string;
+  items: ClipItem[];
+}
+
+export interface DragHover {
+  dir: string;
+  x: number;
+  y: number;
+  mode: 'copy' | 'move' | 'upload';
+  count: number;
+  crossServer: boolean;
+}
+
 // The drag payload is mirrored here: during dragover browsers expose only
-// the MIME types, not the data, and we need the paths to reject invalid
-// targets (a folder into itself, items into their own folder).
-let dragging: { serverId: string; paths: string[]; dirs: string[] } | null = null;
+// the MIME types, not the data, and we need the paths (and their server)
+// to reject invalid targets and to pick move vs copy. It is module state so
+// a drag that starts in one pane can be dropped in the other.
+let dragging: DropSource | null = null;
 
 interface DndOptions {
   serverId: string;
   canControl: boolean;
   dragItems(entry: FsEntry): FsEntry[];
-  onInternalDrop(paths: string[], targetDir: string, mode: 'copy' | 'move'): void;
+  onDropItems(src: DropSource, targetDir: string, mode: 'copy' | 'move'): void;
   onExternalDrop(dt: DataTransfer, targetDir: string): void;
-  onPinDrop(dirs: string[]): void;
+  onPinDrop?: (dirs: string[]) => void;
 }
 
 export function useDnd(o: DndOptions) {
-  const [dropTarget, setDropTarget] = React.useState<string | null>(null);
+  const [hover, setHover] = React.useState<DragHover | null>(null);
   const opts = React.useRef(o);
   opts.current = o;
 
@@ -34,16 +50,15 @@ export function useDnd(o: DndOptions) {
         const items = opts.current.dragItems(entry);
         dragging = {
           serverId: opts.current.serverId,
-          paths: items.map((x) => x.path),
-          dirs: items.filter((x) => x.type === 'dir').map((x) => x.path),
+          items: items.map((x) => ({ path: x.path, isDir: x.type === 'dir', size: x.size })),
         };
-        e.dataTransfer.setData(VANTAGE_DND_TYPE, JSON.stringify({ serverId: dragging.serverId, paths: dragging.paths }));
-        e.dataTransfer.setData('text/plain', dragging.paths.join('\n'));
+        e.dataTransfer.setData(VANTAGE_DND_TYPE, JSON.stringify({ serverId: dragging.serverId, paths: dragging.items.map((i) => i.path) }));
+        e.dataTransfer.setData('text/plain', dragging.items.map((i) => i.path).join('\n'));
         e.dataTransfer.effectAllowed = 'all';
       },
       onDragEnd: () => {
         dragging = null;
-        setDropTarget(null);
+        setHover(null);
       },
     };
   }, []);
@@ -53,24 +68,33 @@ export function useDnd(o: DndOptions) {
       onDragOver: (e) => {
         if (!opts.current.canControl) return;
         const types = Array.from(e.dataTransfer.types);
+        let mode: DragHover['mode'];
+        let count: number;
+        let crossServer = false;
         if (types.includes(VANTAGE_DND_TYPE)) {
-          if (!dragging || dragging.serverId !== opts.current.serverId || !canDropInto(dragging.paths, dir)) return;
-          e.dataTransfer.dropEffect = dropMode(e);
+          const d = dragging;
+          if (!d || !canDropAcross(d.serverId, d.items.map((i) => i.path), opts.current.serverId, dir)) return;
+          crossServer = d.serverId !== opts.current.serverId;
+          mode = crossDropMode(e, !crossServer);
+          count = d.items.length;
+          e.dataTransfer.dropEffect = mode;
         } else if (types.includes('Files')) {
+          mode = 'upload';
+          count = e.dataTransfer.items.length;
           e.dataTransfer.dropEffect = 'copy';
         } else {
           return;
         }
         e.preventDefault();
         e.stopPropagation();
-        setDropTarget(dir);
+        setHover({ dir, x: e.clientX, y: e.clientY, mode, count, crossServer });
       },
       onDragLeave: (e) => {
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-        setDropTarget((t) => (t === dir ? null : t));
+        setHover((h) => (h && h.dir === dir ? null : h));
       },
       onDrop: (e) => {
-        setDropTarget(null);
+        setHover(null);
         if (!opts.current.canControl) return;
         const types = Array.from(e.dataTransfer.types);
         if (types.includes(VANTAGE_DND_TYPE)) {
@@ -78,8 +102,8 @@ export function useDnd(o: DndOptions) {
           e.stopPropagation();
           const d = dragging;
           dragging = null;
-          if (d && d.serverId === opts.current.serverId && canDropInto(d.paths, dir)) {
-            opts.current.onInternalDrop(d.paths, dir, dropMode(e));
+          if (d && canDropAcross(d.serverId, d.items.map((i) => i.path), opts.current.serverId, dir)) {
+            opts.current.onDropItems(d, dir, crossDropMode(e, d.serverId === opts.current.serverId));
           }
         } else if (types.includes('Files')) {
           e.preventDefault();
@@ -94,23 +118,26 @@ export function useDnd(o: DndOptions) {
   const pinDropProps = React.useMemo<ElProps>(
     () => ({
       onDragOver: (e) => {
-        if (!dragging || dragging.dirs.length === 0) return;
+        const d = dragging;
+        // Pins belong to this surface's server; folders from the other
+        // server cannot be pinned here.
+        if (!d || d.serverId !== opts.current.serverId || !d.items.some((i) => i.isDir)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'link';
-        setDropTarget(PIN_TARGET);
+        setHover({ dir: PIN_TARGET, x: e.clientX, y: e.clientY, mode: 'copy', count: 0, crossServer: false });
       },
-      onDragLeave: () => setDropTarget((t) => (t === PIN_TARGET ? null : t)),
+      onDragLeave: () => setHover((h) => (h && h.dir === PIN_TARGET ? null : h)),
       onDrop: (e) => {
-        setDropTarget(null);
-        if (!dragging) return;
+        setHover(null);
+        const d = dragging;
+        if (!d || d.serverId !== opts.current.serverId) return;
         e.preventDefault();
-        const dirs = dragging.dirs;
         dragging = null;
-        opts.current.onPinDrop(dirs);
+        opts.current.onPinDrop?.(d.items.filter((i) => i.isDir).map((i) => i.path));
       },
     }),
     [],
   );
 
-  return { dragPropsFor, dropPropsFor, pinDropProps, dropTarget };
+  return { dragPropsFor, dropPropsFor, pinDropProps, dropTarget: hover?.dir ?? null, hover };
 }
