@@ -209,6 +209,29 @@ describe('runCrossTransfer — review fixes', () => {
     await first;
   });
 
+  it('tells the caller it started only when the run was accepted', async () => {
+    // FilesTab points the status-line Cancel at a run's controller on
+    // onStart; a refused second run must not steal it from the first.
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const slow = setup();
+    slow.d.api.awaitTransfer = () => hold;
+    let firstStarted = 0;
+    const first = runCrossTransfer({ ...slow.d, onStart: () => firstStarted++ }, { serverId: A, items: [two[0]!] }, { serverId: B, dir: '/dst' }, 'copy');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(firstStarted).toBe(1);
+    const second = setup();
+    let secondStarted = 0;
+    await runCrossTransfer({ ...second.d, onStart: () => secondStarted++ }, { serverId: A, items: [two[1]!] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(secondStarted).toBe(0);
+    release();
+    await first;
+    const busy = setup({ over: { claim: () => false } });
+    let busyStarted = 0;
+    await runCrossTransfer({ ...busy.d, onStart: () => busyStarted++ }, { serverId: A, items: [two[1]!] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(busyStarted).toBe(0);
+  });
+
   it('shows scan progress while walking folders, then clears it', async () => {
     const statuses: (string | null)[] = [];
     const { d } = setup({ over: { onStatus: (s) => statuses.push(s) } });

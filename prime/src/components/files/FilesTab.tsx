@@ -287,10 +287,16 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     mode: 'copy' | 'move',
   ) => {
     const ctrl = new AbortController();
-    scanAbort.current = ctrl;
-    void runCrossTransfer({ ...crossDeps, signal: ctrl.signal }, src, dst, mode).finally(() => {
-      if (scanAbort.current === ctrl) scanAbort.current = null;
-    });
+    // Only an accepted run takes over Cancel: a second one refused while the
+    // first is scanning must not leave Cancel pointing at itself.
+    const onStart = () => {
+      scanAbort.current = ctrl;
+    };
+    void runCrossTransfer({ ...crossDeps, signal: ctrl.signal, onStart }, src, dst, mode)
+      .catch((e: unknown) => crossDeps.onError(e instanceof Error ? e.message : String(e)))
+      .finally(() => {
+        if (scanAbort.current === ctrl) scanAbort.current = null;
+      });
   };
 
   // --- commands ---------------------------------------------------------------

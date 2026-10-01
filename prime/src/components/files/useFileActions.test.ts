@@ -23,8 +23,8 @@ const cut: FsClipboard = {
   serverId: 's1',
   mode: 'cut',
   items: [
-    { path: '/a/one.txt', type: 'file' },
-    { path: '/a/two.txt', type: 'file' },
+    { path: '/a/one.txt', isDir: false, size: 3, type: 'file' },
+    { path: '/a/two.txt', isDir: false, size: 3, type: 'file' },
   ],
 };
 

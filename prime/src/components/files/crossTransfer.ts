@@ -73,6 +73,9 @@ export interface CrossDeps {
   release?: () => void;
   // Aborting cancels the run while it is still scanning/preparing.
   signal?: AbortSignal;
+  // The run was accepted (not refused as a second run or a busy slot), so
+  // the caller can wire its Cancel to this run's signal.
+  onStart?: () => void;
   afterMutation(serverId: string, dirs: readonly string[]): Promise<void>;
 }
 
@@ -109,6 +112,7 @@ export async function runCrossTransfer(
   active = true;
   const ctx = { handedOff: false };
   try {
+    d.onStart?.();
     return await crossRun(d, src, dst, mode, ctx);
   } finally {
     active = false;
