@@ -9,13 +9,16 @@
  * SSRF validation, and callers are told when the address changed so they can
  * persist it. Connecting by validated IP still defeats DNS rebinding within
  * a request.
+ *
+ * Fail closed: if the name can't be resolved (e.g. a Docker container being
+ * recreated) the request errors. Falling back to the saved IP would send the
+ * token to whichever machine now holds that address.
  */
 
-import { isBlockedIP, validateAndResolve } from './net-policy.js';
+import { validateAndResolve } from './net-policy.js';
 
 export interface TargetResolverOptions {
   resolve?: (url: string) => Promise<{ ip: string }>;
-  isBlocked?: (ip: string) => boolean;
   now?: () => number;
   ttlMs?: number;
 }
@@ -26,7 +29,6 @@ export interface TargetResolver {
 
 export function createTargetResolver(o: TargetResolverOptions = {}): TargetResolver {
   const resolve = o.resolve ?? validateAndResolve;
-  const isBlocked = o.isBlocked ?? isBlockedIP;
   const now = o.now ?? Date.now;
   const ttl = o.ttlMs ?? 60_000;
   const cache = new Map<string, { ip: string; at: number }>();
@@ -38,17 +40,9 @@ export function createTargetResolver(o: TargetResolverOptions = {}): TargetResol
       if (hit && now() - hit.at <= ttl) {
         ip = hit.ip;
       } else {
-        try {
-          ip = (await resolve(url)).ip;
-        } catch (err) {
-          const message = (err as Error).message;
-          // A name that now points into a blocked range is an SSRF signal:
-          // refuse rather than quietly using the old address.
-          if (/blocked range/.test(message)) throw err;
-          // A temporary DNS failure: keep using the last validated address.
-          if (savedIp && !isBlocked(savedIp)) return savedIp;
-          throw err;
-        }
+        // Throws on a name that doesn't resolve or resolves into a blocked
+        // range; both reach the caller as an error.
+        ip = (await resolve(url)).ip;
         cache.set(url, { ip, at: now() });
       }
       if (ip !== savedIp) onChange?.(ip);

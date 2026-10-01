@@ -17,7 +17,6 @@ function setup(answers: (string | Error)[]) {
       if (a instanceof Error) throw a;
       return { ip: a };
     },
-    isBlocked: (ip) => ip.startsWith('169.254.'),
     now: () => now,
     ttlMs: 60_000,
   });
@@ -49,19 +48,16 @@ test('reuses a lookup for a minute, then looks again', async () => {
   assert.equal(calls(), 2);
 });
 
-test('a temporary DNS failure falls back to the saved address', async () => {
+test('a name that does not resolve is an error — never the old address', async () => {
+  // e.g. a Docker container being recreated: its old IP may already belong
+  // to another container, which must not receive the outpost token.
   const { resolver } = setup([new Error('BAD_URL: hostname did not resolve (h)')]);
-  assert.equal(await resolver.currentIp('http://h:1', '10.0.0.9'), '10.0.0.9');
+  await assert.rejects(resolver.currentIp('http://h:1', '10.0.0.9'), /did not resolve/);
 });
 
 test('a name that now resolves into a blocked range is refused, never falls back', async () => {
   const { resolver } = setup([new Error('BAD_URL: resolved IP 169.254.1.1 is in a blocked range')]);
   await assert.rejects(resolver.currentIp('http://h:1', '10.0.0.9'), /blocked range/);
-});
-
-test('a saved address in a blocked range is not used as a fallback', async () => {
-  const { resolver } = setup([new Error('BAD_URL: hostname did not resolve (h)')]);
-  await assert.rejects(resolver.currentIp('http://h:1', '169.254.0.5'), /did not resolve/);
 });
 
 test('without a saved address a DNS failure is an error', async () => {
