@@ -436,3 +436,54 @@ export const MoreIcon = (p: IconProps) => (
 
 // Pair with className="animate-spin".
 export const LoaderIcon = (p: IconProps) => <Icon {...p} d="M21 12a9 9 0 1 1-6.22-8.56" />;
+
+const fileWith = (extra: React.ReactNode) => (
+  <>
+    {FILE_OUTLINE}
+    {extra}
+  </>
+);
+
+export const FileVideoIcon = (p: IconProps) => <Icon {...p} paths={fileWith(<path d="m10 11.5 4.5 3-4.5 3z" />)} />;
+
+export const FileAudioIcon = (p: IconProps) => (
+  <Icon {...p} paths={fileWith(<><circle cx="10" cy="17" r="1.8" /><path d="M11.8 17v-5.5l3-.8" /></>)} />
+);
+
+export const FilePdfIcon = (p: IconProps) => (
+  <Icon {...p} paths={fileWith(<path d="M8.5 18v-5h2a1.5 1.5 0 0 1 0 3h-2M14 13v5" />)} />
+);
+
+export const FileDocumentIcon = (p: IconProps) => (
+  <Icon {...p} paths={fileWith(<path d="M8 12h8M8 15h8M8 18h5" />)} />
+);
+
+export const FileSpreadsheetIcon = (p: IconProps) => (
+  <Icon {...p} paths={fileWith(<path d="M8 12h8v6H8zM8 15h8M12 12v6" />)} />
+);
+
+export const FileConfigIcon = (p: IconProps) => (
+  <Icon {...p} paths={fileWith(<><circle cx="12" cy="15" r="1.8" /><path d="M12 11.5v1.2M12 17.3v1.2M8.5 15h1.2M14.3 15h1.2" /></>)} />
+);
+
+export const FileFontIcon = (p: IconProps) => <Icon {...p} paths={fileWith(<path d="m8.5 18 2.5-6 2.5 6M9.5 16h3" />)} />;
+
+export const FileLogIcon = (p: IconProps) => (
+  <Icon {...p} paths={fileWith(<path d="M8 12h1M11 12h5M8 15h1M11 15h5M8 18h1M11 18h3" />)} />
+);
+
+export const TerminalIcon = (p: IconProps) => (
+  <Icon {...p} paths={<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M12.5 15h4.5" /></>} />
+);
+
+export const KeyIcon = (p: IconProps) => (
+  <Icon {...p} paths={<><circle cx="7.5" cy="15.5" r="4.5" /><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2" /></>} />
+);
+
+export const DatabaseIcon = (p: IconProps) => (
+  <Icon {...p} paths={<><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></>} />
+);
+
+export const DiscIcon = (p: IconProps) => (
+  <Icon {...p} paths={<><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2" /></>} />
+);
