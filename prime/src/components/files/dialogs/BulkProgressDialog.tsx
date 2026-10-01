@@ -16,18 +16,21 @@ interface BulkProgressDialogProps {
   title: string;
   states: readonly ItemState[];
   finished: boolean;
+  // Past the point of no return: clean-up after the items (e.g. trashing
+  // moved sources) is running and Cancel would do nothing.
+  settling?: boolean;
   onCancel: () => void;
   onRetry: () => void;
   onClose: () => void;
 }
 
-export function BulkProgressDialog({ title, states, finished, onCancel, onRetry, onClose }: BulkProgressDialogProps) {
+export function BulkProgressDialog({ title, states, finished, settling = false, onCancel, onRetry, onClose }: BulkProgressDialogProps) {
   const s = summarize(states);
   const parts = (['done', 'failed', 'skipped', 'cancelled', 'running', 'queued'] as const)
     .filter((k) => s[k] > 0)
     .map((k) => `${s[k]} ${k}`);
   return (
-    <Dialog open onOpenChange={(o) => !o && (finished ? onClose() : onCancel())}>
+    <Dialog open onOpenChange={(o) => !o && !settling && (finished ? onClose() : onCancel())}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-sm">{title}</DialogTitle>
@@ -45,7 +48,9 @@ export function BulkProgressDialog({ title, states, finished, onCancel, onRetry,
           </ul>
         </div>
         <DialogFooter>
-          {!finished ? (
+          {settling && !finished ? (
+            <span className="text-xs text-muted-foreground">Finishing…</span>
+          ) : !finished ? (
             <Button size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
           ) : (
             <>

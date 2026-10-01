@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createRoot } from 'react-dom/client';
 import { act } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useBulkRunner, type AskConflict } from './useBulkRunner';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -117,5 +117,74 @@ describe('useBulkRunner — slot and unmount', () => {
     const states = await runBulk('late', items(1), async () => { ran = true; });
     expect(ran).toBe(false);
     expect(states[0]?.status).toBe('cancelled');
+  });
+});
+
+describe('useBulkRunner — clean-up step', () => {
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `i${i}`, label: `i${i}` }));
+  function mountRunner() {
+    const api: { r: ReturnType<typeof useBulkRunner> | null } = { r: null };
+    function Probe() {
+      const r = useBulkRunner(() => {}, () => {});
+      api.r = r;
+      return <>{r.dialogs}</>;
+    }
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<Probe />));
+    return { api, root, host };
+  }
+  afterEach(() => vi.useRealTimers());
+
+  it('frees the operation slot when the clean-up step throws', async () => {
+    const { api, root, host } = mountRunner();
+    await act(async () => {
+      await expect(
+        api.r!.runBulk('crash', items(1), async () => {}, {
+          onSettled: () => { throw new Error('settle blew up'); },
+        }),
+      ).rejects.toThrow('settle blew up');
+    });
+    let next: { status: string }[] = [];
+    await act(async () => { next = await api.r!.runBulk('next', items(1), async () => {}); });
+    expect(next[0]?.status).toBe('done');
+    act(() => root.unmount());
+    host.remove();
+  });
+
+  it('frees a claimed slot when the clean-up of an empty batch throws', async () => {
+    const { api, root, host } = mountRunner();
+    expect(api.r!.claim()).toBe(true);
+    await act(async () => {
+      await expect(
+        api.r!.runBulk('empty', [], async () => {}, {
+          claimed: true,
+          onSettled: () => { throw new Error('settle blew up'); },
+        }),
+      ).rejects.toThrow('settle blew up');
+    });
+    expect(api.r!.claim()).toBe(true);
+    api.r!.release();
+    act(() => root.unmount());
+    host.remove();
+  });
+
+  it('shows "Finishing…" without a Cancel button while a slow clean-up runs', async () => {
+    vi.useFakeTimers();
+    const { api, root, host } = mountRunner();
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    let run!: Promise<unknown>;
+    await act(async () => {
+      run = api.r!.runBulk('move', items(1), async () => {}, { onSettled: () => hold });
+    });
+    await act(async () => { vi.advanceTimersByTime(1100); });
+    expect(document.body.textContent).toContain('Finishing…');
+    const buttons = [...document.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons).not.toContain('Cancel');
+    await act(async () => { release(); await run; });
+    act(() => root.unmount());
+    host.remove();
   });
 });

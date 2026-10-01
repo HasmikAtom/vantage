@@ -30,6 +30,9 @@ interface ViewState {
   title: string;
   states: ItemState[];
   finished: boolean;
+  // Items are done; onSettled (e.g. trashing moved sources) is running and
+  // can no longer be cancelled.
+  settling: boolean;
   visible: boolean;
   op: BulkOp;
   opts: RunBulkOptions;
@@ -122,51 +125,73 @@ export function useBulkRunner(
         return items.map((item): ItemState => ({ item, status: 'cancelled', error: null }));
       }
       if (items.length === 0) {
-        await opts.onSettled?.([]);
-        if (opts.claimed) busy.current = false;
+        try {
+          await opts.onSettled?.([]);
+        } finally {
+          if (opts.claimed) busy.current = false;
+        }
         return [];
       }
       busy.current = true;
-      const run = new BulkRun(
-        items,
-        op,
-        {
-          onUpdate: (states) => setView((v) => (v ? { ...v, states: [...states] } : v)),
-          onConflict: askConflict,
-        },
-        opts.concurrency ?? 4,
-      );
-      runRef.current = run;
-      cancelHook.current = opts.onCancel ?? null;
-      setView({
-        title,
-        states: items.map((item): ItemState => ({ item, status: 'queued', error: null })),
-        finished: false,
-        visible: items.length > 5,
-        op,
-        opts,
-      });
-      shown.current = items.length > 5;
-      const timer = window.setTimeout(() => {
-        shown.current = true;
-        setView((v) => (v ? { ...v, visible: true } : v));
-      }, 1000);
-      const final = await run.start();
-      window.clearTimeout(timer);
-      runRef.current = null;
-      cancelHook.current = null;
-      await opts.onSettled?.(final);
-      const failed = final.some((s) => s.status === 'failed');
-      // A quick clean run never showed a dialog: free right away. Otherwise
-      // the finished dialog (and its Retry) holds the slot until closed.
-      if (!shown.current && !failed) {
+      let timer: number | undefined;
+      try {
+        const run = new BulkRun(
+          items,
+          op,
+          {
+            onUpdate: (states) => setView((v) => (v ? { ...v, states: [...states] } : v)),
+            onConflict: askConflict,
+          },
+          opts.concurrency ?? 4,
+        );
+        runRef.current = run;
+        cancelHook.current = opts.onCancel ?? null;
+        setView({
+          title,
+          states: items.map((item): ItemState => ({ item, status: 'queued', error: null })),
+          finished: false,
+          settling: false,
+          visible: items.length > 5,
+          op,
+          opts,
+        });
+        shown.current = items.length > 5;
+        // Also covers a slow onSettled, so a quick move whose clean-up drags
+        // on still gets a dialog.
+        timer = window.setTimeout(() => {
+          shown.current = true;
+          setView((v) => (v ? { ...v, visible: true } : v));
+        }, 1000);
+        const final = await run.start();
+        runRef.current = null;
+        cancelHook.current = null;
+        if (opts.onSettled) {
+          setView((v) => (v ? { ...v, states: final, settling: true } : v));
+          await opts.onSettled(final);
+        }
+        window.clearTimeout(timer);
+        const failed = final.some((s) => s.status === 'failed');
+        // A quick clean run never showed a dialog: free right away. Otherwise
+        // the finished dialog (and its Retry) holds the slot until closed.
+        if (!shown.current && !failed) {
+          busy.current = false;
+          setView(null);
+        } else {
+          shown.current = true;
+          setView((v) => (v ? { ...v, states: final, finished: true, settling: false, visible: true } : v));
+        }
+        return final;
+      } catch (e) {
+        // A crash must not leave every later operation refused.
         busy.current = false;
+        shown.current = false;
         setView(null);
-      } else {
-        shown.current = true;
-        setView((v) => (v ? { ...v, states: final, finished: true, visible: true } : v));
+        throw e;
+      } finally {
+        window.clearTimeout(timer);
+        runRef.current = null;
+        cancelHook.current = null;
       }
-      return final;
     },
     [askConflict],
   );
@@ -192,6 +217,7 @@ export function useBulkRunner(
           title={view.title}
           states={view.states}
           finished={view.finished}
+          settling={view.settling}
           onCancel={cancel}
           onRetry={() => void retry()}
           onClose={() => {
