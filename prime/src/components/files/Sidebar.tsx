@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { FsEntry } from '@/types';
 import type { FsPin } from '@/api';
 import { cn } from '@/lib/utils';
+import { edgeScrollDelta } from './logic/scrollMemory';
 import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
 import { ChevronDownIcon, ChevronRightIcon, FolderIcon, PinIcon } from '@/components/ui/icons';
 import type { ElProps } from './FileList';
@@ -76,8 +77,10 @@ export function Sidebar(p: SidebarProps) {
   ];
 
   return (
-    <nav aria-label="Folders" className="flex h-full max-h-[80vh] flex-col gap-3 overflow-auto p-2 text-xs">
-      <section>
+    // Fills the card: pins stay at the top (scrolling only if there are very
+    // many) and the folder tree scrolls underneath.
+    <nav aria-label="Folders" className="flex h-full flex-col gap-3 overflow-hidden p-2 text-xs">
+      <section className="max-h-[50%] shrink-0 overflow-auto">
         <div
           {...(p.pinDropProps ?? {})}
           className={cn(
@@ -113,7 +116,14 @@ export function Sidebar(p: SidebarProps) {
           ))}
         </ul>
       </section>
-      <section className="min-h-0">
+      <section
+        className="min-h-0 flex-1 overflow-auto"
+        onDragOverCapture={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          const dy = edgeScrollDelta(e.clientY, r.top, r.bottom);
+          if (dy !== 0) e.currentTarget.scrollTop += dy;
+        }}
+      >
         <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Folders</div>
         <TreeNode
           serverId={p.serverId}

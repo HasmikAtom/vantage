@@ -8,6 +8,7 @@ import { ContextMenu, type MenuEntry } from '@/components/ui/context-menu';
 import { FilePane, type PaneCommand, type PaneId } from './FilePane';
 import { Sidebar } from './Sidebar';
 import { useSidebarWidth } from './hooks/useSidebarWidth';
+import { useFillHeight } from './hooks/useFillHeight';
 import { EDITOR_MAX_BYTES, ROOT } from './fsPath';
 import { backgroundMenu, itemMenu, type MenuCtx } from './menus';
 import { useFileActions } from './useFileActions';
@@ -168,6 +169,9 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const bodyRef = React.useRef<HTMLDivElement>(null);
   const sidebar = useSidebarWidth(bodyRef, split);
+  // Desktop: the card fills the window so only the list and sidebar scroll.
+  const cardRef = React.useRef<HTMLDivElement>(null);
+  const cardHeight = useFillHeight(cardRef, 24);
   const [showHidden, setShowHidden] = React.useState(false);
   const [sort, setSort] = React.useState<SortSpec>(loadSort);
   const [banner, setBanner] = React.useState<string | null>(null);
@@ -567,78 +571,80 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
         </div>
       )}
 
-      <Card className="overflow-hidden">
-        <div
-          ref={bodyRef}
-          className="flex min-h-[420px]"
-          style={{ '--files-sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
-        >
-          {sidebarOpen && (
-            <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />
-          )}
-          <aside
-            className={cn(
-              'w-56 shrink-0 overflow-hidden border-r bg-muted/10 md:w-[var(--files-sidebar-w)]',
-              sidebarOpen
-                ? 'fixed inset-y-0 left-0 z-40 block w-64 bg-background shadow-xl md:static md:z-auto md:bg-muted/10 md:shadow-none'
-                : 'hidden md:block',
-            )}
-          >
-            <Sidebar
-              serverId={activeServer}
-              currentPath={activeNav.path}
-              showHidden={showHidden}
-              refreshKey={mutationKey}
-              pins={pins}
-              onPinsChange={(next) => void savePins(next)}
-              onNavigate={(path) => {
-                setSidebarOpen(false);
-                activeNav.go(path);
-              }}
-              dropPropsFor={sidebarDnd.dropPropsFor}
-              pinDropProps={sidebarDnd.pinDropProps}
-              dropTarget={sidebarDnd.dropTarget}
-              pinDropActive={sidebarDnd.dropTarget === PIN_TARGET}
-            />
-          </aside>
-          {/* Resize handle: sits over the sidebar's border, desktop only. */}
+      <div ref={cardRef} {...(cardHeight !== undefined ? { style: { height: cardHeight } } : {})}>
+        <Card className="flex h-full flex-col overflow-hidden">
           <div
-            {...sidebar.handleProps}
-            className={cn(
-              'relative z-10 -ml-[3px] hidden w-[5px] shrink-0 cursor-col-resize touch-none outline-none transition-colors md:block',
-              'hover:bg-primary/30 focus-visible:bg-primary/40',
-              sidebar.dragging && 'bg-primary/50',
+            ref={bodyRef}
+            className="flex min-h-[420px] flex-1 md:min-h-0"
+            style={{ '--files-sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
+          >
+            {sidebarOpen && (
+              <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />
             )}
-          />
-          {split && !wide ? (
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex border-b text-xs" role="tablist">
-                {(['left', 'right'] as const).map((pane) => (
-                  <button
-                    key={pane}
-                    type="button"
-                    role="tab"
-                    aria-selected={activePane === pane}
-                    onClick={() => setActive(pane)}
-                    className={cn(
-                      'flex-1 truncate px-2 py-1.5',
-                      activePane === pane ? 'border-b-2 border-primary font-semibold' : 'text-muted-foreground',
-                    )}
-                  >
-                    {pane === 'left' ? 'Left' : 'Right'} · {serverName(serverOf(pane))}
-                  </button>
-                ))}
+            <aside
+              className={cn(
+                'w-56 shrink-0 overflow-hidden border-r bg-muted/10 md:w-[var(--files-sidebar-w)]',
+                sidebarOpen
+                  ? 'fixed inset-y-0 left-0 z-40 block w-64 bg-background shadow-xl md:static md:z-auto md:bg-muted/10 md:shadow-none'
+                  : 'hidden md:block',
+              )}
+            >
+              <Sidebar
+                serverId={activeServer}
+                currentPath={activeNav.path}
+                showHidden={showHidden}
+                refreshKey={mutationKey}
+                pins={pins}
+                onPinsChange={(next) => void savePins(next)}
+                onNavigate={(path) => {
+                  setSidebarOpen(false);
+                  activeNav.go(path);
+                }}
+                dropPropsFor={sidebarDnd.dropPropsFor}
+                pinDropProps={sidebarDnd.pinDropProps}
+                dropTarget={sidebarDnd.dropTarget}
+                pinDropActive={sidebarDnd.dropTarget === PIN_TARGET}
+              />
+            </aside>
+            {/* Resize handle: sits over the sidebar's border, desktop only. */}
+            <div
+              {...sidebar.handleProps}
+              className={cn(
+                'relative z-10 -ml-[3px] hidden w-[5px] shrink-0 cursor-col-resize touch-none outline-none transition-colors md:block',
+                'hover:bg-primary/30 focus-visible:bg-primary/40',
+                sidebar.dragging && 'bg-primary/50',
+              )}
+            />
+            {split && !wide ? (
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <div className="flex border-b text-xs" role="tablist">
+                  {(['left', 'right'] as const).map((pane) => (
+                    <button
+                      key={pane}
+                      type="button"
+                      role="tab"
+                      aria-selected={activePane === pane}
+                      onClick={() => setActive(pane)}
+                      className={cn(
+                        'flex-1 truncate px-2 py-1.5',
+                        activePane === pane ? 'border-b-2 border-primary font-semibold' : 'text-muted-foreground',
+                      )}
+                    >
+                      {pane === 'left' ? 'Left' : 'Right'} · {serverName(serverOf(pane))}
+                    </button>
+                  ))}
+                </div>
+                {renderPane(activePane)}
               </div>
-              {renderPane(activePane)}
-            </div>
-          ) : (
-            <>
-              {renderPane('left')}
-              {split && renderPane('right')}
-            </>
-          )}
-        </div>
-      </Card>
+            ) : (
+              <>
+                {renderPane('left')}
+                {split && renderPane('right')}
+              </>
+            )}
+          </div>
+        </Card>
+      </div>
       {sidebarDnd.hover && sidebarDnd.hover.dir !== PIN_TARGET && (
         <div
           className="pointer-events-none fixed z-50 rounded border bg-popover px-2 py-1 text-[11px] text-popover-foreground shadow"

@@ -16,6 +16,7 @@ import { useDirSizes } from './hooks/useDirSizes';
 import type { FsClipboard } from './logic/clipboard';
 import { shortcutFor, typeAheadChar } from './logic/keys';
 import type { PaneNav } from './logic/paneHistory';
+import { childToward, createScrollMemory } from './logic/scrollMemory';
 import { emptySelection, findTypeAhead, selectionReducer } from './logic/selection';
 import { filterEntries, sortEntries, toggleSort, type SortSpec } from './logic/sort';
 
@@ -123,6 +124,36 @@ export function FilePane(p: FilePaneProps) {
   React.useEffect(() => {
     if (sel.focus) rowIn(rootRef.current, sel.focus)?.scrollIntoView({ block: 'nearest' });
   }, [sel.focus, rootRef]);
+
+  // --- scroll memory ----------------------------------------------------------
+  // Each folder keeps its scroll position for the session. On arriving in a
+  // folder (once its listing is in), the list returns to that position, and
+  // when the new folder is above the old one, the folder you came out of is
+  // selected, as in a desktop file manager.
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const scrollMem = React.useRef(createScrollMemory());
+  const arriving = React.useRef<{ path: string; from: string } | null>(null);
+  const lastPath = React.useRef(nav.path);
+  if (lastPath.current !== nav.path) {
+    arriving.current = { path: nav.path, from: lastPath.current };
+    lastPath.current = nav.path;
+  }
+  React.useLayoutEffect(() => {
+    const a = arriving.current;
+    if (!a || data?.path !== a.path) return;
+    arriving.current = null;
+    const el = listRef.current;
+    if (el) el.scrollTop = scrollMem.current.get(a.path);
+    const child = childToward(a.from, a.path);
+    if (child && byPath.has(child)) dispatch({ type: 'click', path: child, ctrl: false, shift: false, order });
+  }, [data, byPath, order]);
+  const onScrollTop = React.useCallback(
+    (top: number) => {
+      // Ignore the jump while a new folder loads; it isn't where the user was.
+      if (!arriving.current) scrollMem.current.set(nav.path, top);
+    },
+    [nav.path],
+  );
 
   // Any change anywhere (this pane, the other pane, a dialog) bumps
   // mutationKey; reload keeps the rows on screen until fresh data arrives.
@@ -321,7 +352,7 @@ export function FilePane(p: FilePaneProps) {
       onMouseDownCapture={p.onActivate}
       onFocusCapture={p.onActivate}
       className={cn(
-        'flex min-w-0 flex-1 flex-col outline-none',
+        'flex min-h-0 min-w-0 flex-1 flex-col outline-none',
         p.split && p.paneId === 'right' && 'border-l',
         p.split && p.active && 'ring-1 ring-inset ring-primary',
       )}
@@ -361,6 +392,8 @@ export function FilePane(p: FilePaneProps) {
       {p.tip}
       <FileList
         compact={p.split}
+        scrollRef={listRef}
+        onScrollTop={onScrollTop}
         entries={visible}
         emptyText={emptyText({ query, canControl: p.canControl })}
         showParent={nav.path !== '/'}

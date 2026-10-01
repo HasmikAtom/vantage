@@ -3,9 +3,14 @@ import { cn } from '@/lib/utils';
 
 export const Table = ({
   className,
+  containerClassName,
   ...props
-}: React.TableHTMLAttributes<HTMLTableElement>) => (
-  <div className="relative w-full overflow-auto">
+}: React.TableHTMLAttributes<HTMLTableElement> & {
+  // Replaces the wrapper's own overflow-auto, e.g. when an outer element
+  // scrolls and the header must stick to it.
+  containerClassName?: string;
+}) => (
+  <div className={cn('relative w-full', containerClassName ?? 'overflow-auto')}>
     <table className={cn('w-full caption-bottom text-sm', className)} {...props} />
   </div>
 );

@@ -9,6 +9,7 @@ import { formatBytes, formatMtime } from './fsPath';
 import type { SelectionState } from './logic/selection';
 import { formatDirSize, type SizeMap } from './logic/sizes';
 import type { SortKey, SortSpec } from './logic/sort';
+import { edgeScrollDelta } from './logic/scrollMemory';
 
 export type ElProps = React.HTMLAttributes<HTMLElement>;
 
@@ -36,6 +37,9 @@ export interface FileListProps {
   emptyText?: string;
   // Narrow pane (split view): drop the Owner and Mode columns.
   compact?: boolean;
+  // The scrolling element, and its scroll position as it changes.
+  scrollRef?: React.Ref<HTMLDivElement>;
+  onScrollTop?: (top: number) => void;
 }
 
 const NARROW_HIDDEN: ReadonlySet<SortKey> = new Set<SortKey>(['owner', 'mode']);
@@ -74,8 +78,17 @@ export function FileList(p: FileListProps) {
   return (
     <div
       {...bgDrop}
+      ref={p.scrollRef}
+      data-file-scroll=""
+      onScroll={(e) => p.onScrollTop?.(e.currentTarget.scrollTop)}
+      // Dragging near the top or bottom edge scrolls the list.
+      onDragOverCapture={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const dy = edgeScrollDelta(e.clientY, r.top, r.bottom);
+        if (dy !== 0) e.currentTarget.scrollTop += dy;
+      }}
       className={cn(
-        'relative min-h-[260px] flex-1 overflow-auto',
+        'relative min-h-[160px] flex-1 overflow-auto',
         p.currentDir !== undefined && p.dropTarget === p.currentDir && 'bg-primary/5 ring-1 ring-inset ring-primary/40',
       )}
       onClick={(e) => {
@@ -89,8 +102,9 @@ export function FileList(p: FileListProps) {
     >
       {/* Compact rows: 32 px instead of the shared table's 41 px. */}
       {p.error ?? (
-        <Table className="[&_td]:py-1.5 [&_th]:h-8">
-          <TableHeader>
+        <Table className="[&_td]:py-1.5 [&_th]:h-8" containerClassName="">
+          {/* Column headers stay visible while the list scrolls. */}
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead className="w-7 pr-0">
                 <HeaderCheckbox checked={all} indeterminate={selCount > 0 && !all} onChange={p.onToggleAll} />
