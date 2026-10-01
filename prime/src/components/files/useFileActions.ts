@@ -1,7 +1,6 @@
 import * as React from 'react';
 import type { FsEntry } from '@/types';
 import {
-  createTransfer,
   fsCopy,
   fsDelete,
   fsDownloadURL,
@@ -10,7 +9,6 @@ import {
   fsRename,
   fsUpload,
   fsWrite,
-  type TransferProgress,
 } from '@/api';
 import { baseName, copyName, joinPath, parentOf } from './fsPath';
 import { fetchListing } from './hooks/useDirListing';
@@ -26,7 +24,6 @@ export interface FileActionsDeps {
   runBulk: RunBulk;
   afterMutation: (dirs: readonly string[]) => Promise<void>;
   onError: (msg: string) => void;
-  onTransferStarted: (p: TransferProgress) => void;
 }
 
 export interface MoveSource {
@@ -119,24 +116,9 @@ export function createFileActions(d: FileActionsDeps): FileActions {
       if (plan.refused.length) {
         onError(plan.refused.map((r) => `${baseName(r.path)}: ${r.reason}`).join('; '));
       }
-      if (plan.kind === 'transfer') {
-        for (const f of plan.files) {
-          try {
-            const { id } = await createTransfer({
-              srcServer: clip.serverId,
-              srcPath: f.path,
-              dstServer: serverId,
-              dstPath: joinPath(targetDir, baseName(f.path)),
-              mode: clip.mode === 'cut' ? 'move' : 'copy',
-            });
-            d.onTransferStarted({ id, bytesTotal: f.size, bytesDone: 0, status: 'pending', error: null });
-          } catch (e) {
-            onError(`${baseName(f.path)}: ${msg(e)}`);
-          }
-        }
-        if (clip.mode === 'cut') clipboardStore.set(null);
-        return;
-      }
+      // Pastes from another server are routed to runCrossTransfer by the
+      // shell before reaching here.
+      if (plan.kind === 'transfer') return;
       if (plan.ops.length === 0) return;
       await localOps(
         `${clip.mode === 'cut' ? 'Moving' : 'Copying'} ${plural(plan.ops.length, 'item')}`,
@@ -224,9 +206,9 @@ export function createFileActions(d: FileActionsDeps): FileActions {
 }
 
 export function useFileActions(d: FileActionsDeps): FileActions {
-  const { serverId, runBulk, afterMutation, onError, onTransferStarted } = d;
+  const { serverId, runBulk, afterMutation, onError } = d;
   return React.useMemo(
-    () => createFileActions({ serverId, runBulk, afterMutation, onError, onTransferStarted }),
-    [serverId, runBulk, afterMutation, onError, onTransferStarted],
+    () => createFileActions({ serverId, runBulk, afterMutation, onError }),
+    [serverId, runBulk, afterMutation, onError],
   );
 }

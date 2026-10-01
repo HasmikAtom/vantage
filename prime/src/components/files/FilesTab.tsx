@@ -267,8 +267,8 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
 
   const { runBulk, askConflict, dialogs: bulkDialogs } = useBulkRunner(bump);
   const onError = React.useCallback((m: string) => setBanner(m), []);
-  const leftActions = useFileActions({ serverId, runBulk, afterMutation: leftAfter, onError, onTransferStarted: upsertTransfer });
-  const rightActions = useFileActions({ serverId: rightServerId, runBulk, afterMutation: rightAfter, onError, onTransferStarted: upsertTransfer });
+  const leftActions = useFileActions({ serverId, runBulk, afterMutation: leftAfter, onError });
+  const rightActions = useFileActions({ serverId: rightServerId, runBulk, afterMutation: rightAfter, onError });
   const actionsOf = (pane: PaneId) => (pane === 'right' ? rightActions : leftActions);
 
   const crossDeps: CrossDeps = {
