@@ -14,6 +14,7 @@ import {
   updateServer,
 } from './registry.js';
 import { createPinStore, validatePins } from './pins.js';
+import { saveResolvedIp } from './resolvedIp.js';
 import { targetResolver } from './targetIp.js';
 import {
   ensureAuditSchema,
@@ -32,6 +33,7 @@ import {
 import {
   validateAndResolve,
   isBlockedIP,
+  urlHost,
   resolveHostnamesToIPs,
   assertSafeURL,
 } from './net-policy.js';
@@ -521,7 +523,7 @@ viewerApi.all('/servers/:id/*', async (c) => {
   let pinnedIp: string;
   try {
     pinnedIp = await targetResolver.currentIp(target.url, target.resolvedIp, (ip) => {
-      updateServer(user.id, id, { resolvedIp: ip });
+      saveResolvedIp(db, user.id, id, target.url, ip);
     });
   } catch (err) {
     return c.json({ error: `outpost address failed validation: ${(err as Error).message}` }, 502);
@@ -609,7 +611,7 @@ viewerApi.all('/servers/:id/*', async (c) => {
     let connectURL: string;
     if (parsedTarget.protocol === 'http:') {
       const port = parsedTarget.port || '80';
-      const hostInUrl = pinnedIp;
+      const hostInUrl = urlHost(pinnedIp);
       // Build the IP-form URL by swapping the hostname segment of upstreamURL.
       // upstreamURL was constructed from target.url + tail + search, so we
       // can safely reparse it here.

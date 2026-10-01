@@ -10,6 +10,10 @@
  * persist it. Connecting by validated IP still defeats DNS rebinding within
  * a request.
  *
+ * Concurrent requests for one URL share a single lookup, and when the saved
+ * IP is still among the validated answers it is kept, so a name with several
+ * addresses doesn't flip between them.
+ *
  * Fail closed: if the name can't be resolved (e.g. a Docker container being
  * recreated) the request errors. Falling back to the saved IP would send the
  * token to whichever machine now holds that address.
@@ -18,7 +22,7 @@
 import { validateAndResolve } from './net-policy.js';
 
 export interface TargetResolverOptions {
-  resolve?: (url: string) => Promise<{ ip: string }>;
+  resolve?: (url: string) => Promise<{ ip: string; ips?: string[] }>;
   now?: () => number;
   ttlMs?: number;
 }
@@ -31,20 +35,31 @@ export function createTargetResolver(o: TargetResolverOptions = {}): TargetResol
   const resolve = o.resolve ?? validateAndResolve;
   const now = o.now ?? Date.now;
   const ttl = o.ttlMs ?? 60_000;
-  const cache = new Map<string, { ip: string; at: number }>();
+  const cache = new Map<string, { ip: string; ips: string[]; at: number }>();
+  const inflight = new Map<string, Promise<{ ip: string; ips: string[] }>>();
+
+  // Throws on a name that doesn't resolve or resolves into a blocked range;
+  // both reach the caller as an error and nothing is cached.
+  function lookup(url: string): Promise<{ ip: string; ips: string[] }> {
+    let p = inflight.get(url);
+    if (!p) {
+      p = resolve(url)
+        .then((r) => {
+          const entry = { ip: r.ip, ips: r.ips ?? [r.ip], at: now() };
+          cache.set(url, entry);
+          return entry;
+        })
+        .finally(() => inflight.delete(url));
+      inflight.set(url, p);
+    }
+    return p;
+  }
 
   return {
     async currentIp(url, savedIp, onChange) {
       const hit = cache.get(url);
-      let ip: string;
-      if (hit && now() - hit.at <= ttl) {
-        ip = hit.ip;
-      } else {
-        // Throws on a name that doesn't resolve or resolves into a blocked
-        // range; both reach the caller as an error.
-        ip = (await resolve(url)).ip;
-        cache.set(url, { ip, at: now() });
-      }
+      const answer = hit && now() - hit.at <= ttl ? hit : await lookup(url);
+      const ip = savedIp !== null && answer.ips.includes(savedIp) ? savedIp : answer.ip;
       if (ip !== savedIp) onChange?.(ip);
       return ip;
     },

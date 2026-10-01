@@ -18,6 +18,7 @@ import {
   isBlockedIP,
   resolveHostnamesToIPs,
   safeFetch,
+  urlHost,
 } from './net-policy.js';
 
 // Make sure the env switch isn't carried in from the parent shell — these
@@ -216,4 +217,10 @@ test('safeFetch: refuses a hostname that resolves to loopback (rebinding-style)'
 test('safeFetch: blocks file: and other dangerous schemes before any I/O', async () => {
   await assert.rejects(() => safeFetch('file:///etc/passwd'), /BAD_URL/);
   await assert.rejects(() => safeFetch('gopher://example.com/'), /BAD_URL/);
+});
+
+test('urlHost: brackets IPv6 literals so they can sit in a URL', () => {
+  assert.equal(urlHost('10.0.0.5'), '10.0.0.5');
+  assert.equal(urlHost('fd00::5'), '[fd00::5]');
+  assert.equal(new URL(`http://${urlHost('fd00::5')}:8080/x`).hostname, '[fd00::5]');
 });

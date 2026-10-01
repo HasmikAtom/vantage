@@ -33,7 +33,7 @@ import type { Context } from 'hono';
 import { getServerToken } from './registry.js';
 import { snapshotFor, snapshotOf } from './transferSnapshot.js';
 import { targetResolver } from './targetIp.js';
-import { assertSafeURL, isBlockedIP, resolveHostnamesToIPs } from './net-policy.js';
+import { assertSafeURL, isBlockedIP, resolveHostnamesToIPs, urlHost } from './net-policy.js';
 
 export type TransferMode = 'move' | 'copy';
 
@@ -206,7 +206,7 @@ async function buildPinnedRequest(
   const orig = new URL(target.url);
   if (u.protocol === 'http:') {
     const port = u.port || '80';
-    const connectURL = `${u.protocol}//${pinnedIp}:${port}${u.pathname}${u.search}`;
+    const connectURL = `${u.protocol}//${urlHost(pinnedIp)}:${port}${u.pathname}${u.search}`;
     const defaultPort = '80';
     const hostHeader =
       orig.port && orig.port !== defaultPort ? `${orig.hostname}:${orig.port}` : orig.hostname;

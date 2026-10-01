@@ -329,6 +329,8 @@ export interface ValidatedTarget {
   url: URL;
   ip: string;
   family: 4 | 6;
+  /** Every answer the hostname resolved to; all passed the SSRF check. */
+  ips: string[];
 }
 
 /**
@@ -352,7 +354,7 @@ export async function validateAndResolve(url: string): Promise<ValidatedTarget> 
   // v6 if no v4 came back.
   const v4 = ips.find((ip) => isIPv4(ip));
   const picked = v4 ?? ips[0];
-  return { url: u, ip: picked, family: isIPv4(picked) ? 4 : 6 };
+  return { url: u, ip: picked, family: isIPv4(picked) ? 4 : 6, ips };
 }
 
 /**
@@ -407,4 +409,9 @@ export async function safeFetch(url: string, init?: RequestInit): Promise<Respon
     headers,
     redirect: 'manual',
   });
+}
+
+/** An IP literal as it must appear in a URL's host: IPv6 needs brackets. */
+export function urlHost(ip: string): string {
+  return isIPv6(ip) ? `[${ip}]` : ip;
 }

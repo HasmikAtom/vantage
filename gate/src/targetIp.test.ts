@@ -64,3 +64,40 @@ test('without a saved address a DNS failure is an error', async () => {
   const { resolver } = setup([new Error('BAD_URL: hostname did not resolve (h)')]);
   await assert.rejects(resolver.currentIp('http://h:1', null), /did not resolve/);
 });
+
+test('requests made at the same time share one lookup', async () => {
+  let calls = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const resolver = createTargetResolver({
+    resolve: async () => {
+      calls++;
+      await gate;
+      return { ip: '10.0.0.1', ips: ['10.0.0.1'] };
+    },
+  });
+  const a = resolver.currentIp('http://h:1', null);
+  const b = resolver.currentIp('http://h:1', null);
+  release();
+  assert.deepEqual(await Promise.all([a, b]), ['10.0.0.1', '10.0.0.1']);
+  assert.equal(calls, 1);
+});
+
+test('a failed shared lookup is not cached', async () => {
+  const { resolver, calls } = setup([new Error('BAD_URL: hostname did not resolve (h)'), '10.0.0.1']);
+  await assert.rejects(resolver.currentIp('http://h:1', null));
+  assert.equal(await resolver.currentIp('http://h:1', null), '10.0.0.1');
+  assert.equal(calls(), 2);
+});
+
+test('keeps the saved address while it is still one of the answers', async () => {
+  // Round-robin names list their addresses in varying order; following the
+  // first answer would flip the saved IP back and forth.
+  const resolver = createTargetResolver({
+    resolve: async () => ({ ip: '10.0.0.1', ips: ['10.0.0.1', '10.0.0.2'] }),
+  });
+  const changed: string[] = [];
+  const ip = await resolver.currentIp('http://h:1', '10.0.0.2', (n) => changed.push(n));
+  assert.equal(ip, '10.0.0.2');
+  assert.deepEqual(changed, []);
+});
