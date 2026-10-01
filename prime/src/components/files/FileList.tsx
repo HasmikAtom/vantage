@@ -33,6 +33,7 @@ export interface FileListProps {
   dropPropsFor?: (dir: string) => ElProps;
   dropTarget?: string | null;
   currentDir?: string;
+  emptyText?: string;
 }
 
 const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
@@ -116,7 +117,7 @@ export function FileList(p: FileListProps) {
             )}
             {p.entries.length === 0 && !p.loading && (
               <TableRow>
-                <TableCell colSpan={7} className="text-xs text-muted-foreground">empty</TableCell>
+                <TableCell colSpan={7} className="text-xs text-muted-foreground">{p.emptyText ?? 'empty'}</TableCell>
               </TableRow>
             )}
             {p.entries.map((e) => (

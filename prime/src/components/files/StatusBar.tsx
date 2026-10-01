@@ -53,6 +53,7 @@ export function StatusBar(p: StatusBarProps) {
           variant="outline"
           disabled={p.selectedCount === 0 || !p.canControl}
           onClick={p.onTrash}
+          title="Move to trash (Del)"
           className="text-destructive hover:text-destructive"
         >
           <TrashIcon size={11} /> Trash

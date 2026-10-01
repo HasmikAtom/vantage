@@ -76,6 +76,13 @@ export function Toolbar(p: ToolbarProps) {
           value={p.query}
           onChange={(e) => p.onQuery(e.target.value)}
           placeholder="Filter this folder"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && p.query !== '') {
+              e.preventDefault();
+              e.stopPropagation();
+              p.onQuery('');
+            }
+          }}
           className="h-7 w-44 text-xs"
         />
         <label className="flex cursor-pointer items-center gap-1 text-[10px] text-muted-foreground">

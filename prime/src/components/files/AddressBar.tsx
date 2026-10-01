@@ -19,6 +19,7 @@ interface AddressBarProps {
   onToggleSidebar?: () => void;
   // Split view: the pane's server picker, rendered at the start of the bar.
   serverPicker?: React.ReactNode;
+  refreshTitle?: string;
   dropPropsFor?: (dir: string) => ElProps;
   dropTarget?: string | null;
 }
@@ -71,10 +72,10 @@ export function AddressBar(p: AddressBarProps) {
           <MenuIcon size={12} />
         </Button>
       )}
-      <Button size="xs" variant="ghost" disabled={!p.canBack} onClick={p.onBack} title="Back">
+      <Button size="xs" variant="ghost" disabled={!p.canBack} onClick={p.onBack} title="Back (Alt+←)">
         <ArrowLeftIcon size={12} />
       </Button>
-      <Button size="xs" variant="ghost" disabled={!p.canForward} onClick={p.onForward} title="Forward">
+      <Button size="xs" variant="ghost" disabled={!p.canForward} onClick={p.onForward} title="Forward (Alt+→)">
         <ArrowRightIcon size={12} />
       </Button>
       <Button size="xs" variant="ghost" disabled={p.path === '/'} onClick={p.onUp} title="Up (Backspace)">
@@ -141,7 +142,7 @@ export function AddressBar(p: AddressBarProps) {
           </div>
         )}
       </div>
-      <Button size="xs" variant="ghost" onClick={p.onRefresh} title="Refresh (F5)">
+      <Button size="xs" variant="ghost" onClick={p.onRefresh} title={p.refreshTitle ?? 'Refresh (F5)'}>
         <RefreshIcon size={11} />
       </Button>
     </div>

@@ -25,6 +25,7 @@ import { usePins } from './hooks/usePins';
 import type { ClipItem } from './logic/clipboard';
 import type { PaneNav } from './logic/paneHistory';
 import { addPin } from './logic/pins';
+import { dropLabel } from './logic/hints';
 import { DEFAULT_SORT, parseSort, type SortSpec } from './logic/sort';
 import { parseFilesHash, splitHashFor, type FilesHash } from './logic/splitHash';
 import { planToOther } from './logic/toOther';
@@ -145,6 +146,11 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
       rightMem.reset(here);
       setRightServerId(serverId);
       setActive('left');
+      try {
+        if (localStorage.getItem('vantage.files.splitTipSeen') !== '1') setTipOpen(true);
+      } catch {
+        setTipOpen(true);
+      }
       setSplit(true);
       return;
     }
@@ -154,6 +160,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     if (keepServer !== serverId) onSelectServer(keepServer);
     browserNav.reset(keepPath);
     setActive('left');
+    setTipOpen(false);
     setSplit(false);
   };
 
@@ -167,6 +174,30 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
   const [modal, setModal] = React.useState<Modal | null>(null);
   const [menu, setMenu] = React.useState<MenuState | null>(null);
   const [helpOpen, setHelpOpen] = React.useState(false);
+  const [showHints, setShowHints] = React.useState(() => {
+    try {
+      return localStorage.getItem('vantage.files.hints') !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const [tipOpen, setTipOpen] = React.useState(false);
+  const setHints = (on: boolean) => {
+    setShowHints(on);
+    try {
+      localStorage.setItem('vantage.files.hints', on ? 'on' : 'off');
+    } catch {
+      // per-viewer convenience only
+    }
+  };
+  const dismissTip = () => {
+    setTipOpen(false);
+    try {
+      localStorage.setItem('vantage.files.splitTipSeen', '1');
+    } catch {
+      // per-viewer convenience only
+    }
+  };
   const [transfers, setTransfers] = React.useState<Record<string, TransferProgress>>({});
   const [mutationKey, setMutationKey] = React.useState(0);
   const uploadFilesRef = React.useRef<HTMLInputElement>(null);
@@ -459,6 +490,23 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
       onCommand={(c) => handleCommand(pane, c)}
       onToggleSidebar={() => setSidebarOpen((v) => !v)}
       otherTarget={split ? `${serverName(serverOf(otherOf(pane)))}:${navOf(otherOf(pane)).path}` : null}
+      serverLabel={serverName(serverOf(pane))}
+      showHints={showHints}
+      onHideHints={() => setHints(false)}
+      {...(pane === 'right' && tipOpen
+        ? {
+            tip: (
+              <div className="flex items-start gap-2 border-b bg-primary/5 px-3 py-2 text-xs">
+                <span className="flex-1">
+                  Pick a server and folder here. Tab switches panes; F5/F6 copy/move across.
+                </span>
+                <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="Dismiss tip" onClick={dismissTip}>
+                  ✕
+                </button>
+              </div>
+            ),
+          }
+        : {})}
     />
   );
 
@@ -539,6 +587,18 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
           )}
         </div>
       </Card>
+      {sidebarDnd.hover && sidebarDnd.hover.dir !== PIN_TARGET && (
+        <div
+          className="pointer-events-none fixed z-50 rounded border bg-popover px-2 py-1 text-[11px] text-popover-foreground shadow"
+          style={{ left: sidebarDnd.hover.x + 14, top: sidebarDnd.hover.y + 14 }}
+        >
+          {dropLabel({
+            mode: sidebarDnd.hover.mode,
+            count: sidebarDnd.hover.count,
+            target: split ? `${serverName(activeServer)}:${sidebarDnd.hover.dir}` : sidebarDnd.hover.dir,
+          })}
+        </div>
+      )}
 
       <input
         ref={uploadFilesRef}
@@ -631,7 +691,13 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
           }}
         />
       )}
-      {helpOpen && <ShortcutSheet canControl={canControl} onClose={() => setHelpOpen(false)} />}
+      {helpOpen && (
+        <ShortcutSheet
+          canControl={canControl}
+          onClose={() => setHelpOpen(false)}
+          {...(showHints ? {} : { onShowHints: () => setHints(true) })}
+        />
+      )}
 
       {bulkDialogs}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}

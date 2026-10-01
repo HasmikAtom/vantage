@@ -8,7 +8,8 @@ import { FileList } from './FileList';
 import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
 import { parentOf } from './fsPath';
-import { useDnd, type DropSource } from './useDnd';
+import { PIN_TARGET, useDnd, type DropSource } from './useDnd';
+import { dropLabel, emptyText, hintFor } from './logic/hints';
 import { fetchListing, useDirListing } from './hooks/useDirListing';
 import { useDirSizes } from './hooks/useDirSizes';
 import type { FsClipboard } from './logic/clipboard';
@@ -64,6 +65,11 @@ export interface FilePaneProps {
   onToggleSidebar(): void;
   // Split view: "server:/path" of the other pane, for button tooltips.
   otherTarget: string | null;
+  serverLabel: string;
+  showHints: boolean;
+  onHideHints(): void;
+  // One-off callout rendered above the list (first time split view opens).
+  tip?: React.ReactNode;
 }
 
 export function listingError(err: unknown): string {
@@ -332,6 +338,7 @@ export function FilePane(p: FilePaneProps) {
         dropPropsFor={dnd.dropPropsFor}
         dropTarget={dnd.dropTarget}
         serverPicker={serverPicker}
+        refreshTitle={p.split ? 'Refresh (Ctrl+Shift+R)' : 'Refresh (F5)'}
       />
       <Toolbar
         canControl={p.canControl}
@@ -347,8 +354,10 @@ export function FilePane(p: FilePaneProps) {
         onToggleSplit={() => cmd({ type: 'toggleSplit' })}
         onHelp={() => cmd({ type: 'help' })}
       />
+      {p.tip}
       <FileList
         entries={visible}
+        emptyText={emptyText({ query, canControl: p.canControl })}
         showParent={nav.path !== '/'}
         selection={sel}
         sizes={sizes}
@@ -396,6 +405,34 @@ export function FilePane(p: FilePaneProps) {
             }
           : {})}
       />
+      {p.showHints && (
+        <div className="flex items-center gap-2 border-t px-3 py-1 text-[10px] text-muted-foreground">
+          <span className="flex-1 truncate">
+            {hintFor({ selectedCount: selected.length, split: p.split, canControl: p.canControl })}
+          </span>
+          <button
+            type="button"
+            aria-label="Hide hints"
+            title="Hide hints (bring them back from the ? sheet)"
+            className="hover:text-foreground"
+            onClick={p.onHideHints}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      {dnd.hover && dnd.hover.dir !== PIN_TARGET && (
+        <div
+          className="pointer-events-none fixed z-50 rounded border bg-popover px-2 py-1 text-[11px] text-popover-foreground shadow"
+          style={{ left: dnd.hover.x + 14, top: dnd.hover.y + 14 }}
+        >
+          {dropLabel({
+            mode: dnd.hover.mode,
+            count: dnd.hover.count,
+            target: p.split ? `${p.serverLabel}:${dnd.hover.dir}` : dnd.hover.dir,
+          })}
+        </div>
+      )}
     </div>
   );
 }
