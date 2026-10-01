@@ -15,7 +15,7 @@ import { fetchListing } from './hooks/useDirListing';
 import type { RunBulk } from './hooks/useBulkRunner';
 import { isConflict } from './logic/bulk';
 import { preflightConflict } from './logic/conflicts';
-import { clipboardStore, planPaste, type FsClipboard } from './logic/clipboard';
+import { clipboardAfterMove, clipboardStore, planPaste, type FsClipboard } from './logic/clipboard';
 import { canDropInto } from './logic/dnd';
 import { joinRel, type UploadPlan } from './logic/upload';
 
@@ -69,7 +69,7 @@ export function createFileActions(d: FileActionsDeps): FileActions {
     const existing = await existingEntries(serverId, targetDir);
     const taken = new Set(existing.keys());
     const byId = new Map(ops.map((o) => [o.from, o]));
-    await runBulk(
+    const states = await runBulk(
       title,
       ops.map((o) => ({ id: o.from, label: baseName(o.from) })),
       async (item, opts) => {
@@ -88,6 +88,7 @@ export function createFileActions(d: FileActionsDeps): FileActions {
       },
     );
     await afterMutation([targetDir, ...new Set(ops.map((o) => parentOf(o.from)))]);
+    return states;
   };
 
   return {
@@ -120,12 +121,15 @@ export function createFileActions(d: FileActionsDeps): FileActions {
       // shell before reaching here.
       if (plan.kind === 'transfer') return;
       if (plan.ops.length === 0) return;
-      await localOps(
+      const states = await localOps(
         `${clip.mode === 'cut' ? 'Moving' : 'Copying'} ${plural(plan.ops.length, 'item')}`,
         plan.ops,
         targetDir,
       );
-      if (clip.mode === 'cut') clipboardStore.set(null);
+      // Only what really moved leaves the clipboard: a refused, cancelled or
+      // partly failed paste can be tried again.
+      const moved = states.filter((st) => st.status === 'done').map((st) => st.item.id);
+      clipboardStore.set(clipboardAfterMove(clipboardStore.get(), serverId, moved));
     },
 
     async upload(plan, targetDir) {
