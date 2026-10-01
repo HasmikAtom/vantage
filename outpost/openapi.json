@@ -463,10 +463,12 @@
           "temp":     { "type": "integer" },
           "fan":      { "type": "integer" },
           "powerW":   { "type": "number" },
+          "powerCapW": { "type": "number", "description": "Board power limit, watts. 0 when unknown." },
+          "fanRpm":   { "type": "integer", "description": "Fan speed, RPM. 0 when not reported." },
           "voltageV": { "type": "number" },
           "coreMhz":  { "type": "integer" },
           "memMhz":   { "type": "integer" },
-          "pstate":   { "type": "string" },
+          "pstate":   { "type": "string", "description": "Active power state: Nouveau's p-state id, or \"<level> of <max>\" on amdgpu." },
           "pcie": {
             "type": "object",
             "properties": {

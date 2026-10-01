@@ -2,14 +2,15 @@ import type { GpuHeadline } from '@/types';
 import { Card, Separator } from './ui/primitives';
 import { SectionHeader } from './SectionHeader';
 import { heatColor } from '@/lib/utils';
+import { gpuFanText, gpuPowerCeiling } from '@/lib/gpu';
 
 interface Props {
   gpu: GpuHeadline;
 }
 
 /**
- * Renders every Nouveau-friendly GPU detail we can scrape. Util/VRAM stay
- * out by design because Nouveau doesn't expose them.
+ * Renders every GPU detail the driver exposes. amdgpu reports busy % and
+ * VRAM; Nouveau doesn't, so there power draw stands in for utilization.
  */
 export function GPUDetail({ gpu }: Props) {
   const pcie =
@@ -21,8 +22,8 @@ export function GPUDetail({ gpu }: Props) {
       ? `${gpu.pcie.maxSpeed} × ${gpu.pcie.maxWidth}`
       : '';
   const showClocks = gpu.coreMhz > 0 || gpu.memMhz > 0;
-  // Kepler peak ~150W; use that as the heat ramp ceiling so colours mean something.
-  const powerColor = heatColor(Math.min(1, gpu.powerW / 150));
+  // Colour against the card's own power limit so a busy card reads hot.
+  const powerColor = heatColor(Math.min(1, gpu.powerW / gpuPowerCeiling(gpu)));
   // Drivers like Nouveau don't expose util/VRAM. Caller-visible hint.
   const utilUnavailable =
     gpu.driver === 'nouveau' || (gpu.pct === 0 && gpu.vram.total === 0);
@@ -51,13 +52,26 @@ export function GPUDetail({ gpu }: Props) {
               )}
             </div>
             <div className="text-[10px] font-mono text-muted-foreground/80 mt-1">
-              power draw (proxy for utilization on Nouveau)
+              {gpu.driver === 'nouveau'
+                ? 'power draw (proxy for utilization on Nouveau)'
+                : gpu.powerCapW
+                  ? `power draw · limit ${gpu.powerCapW} W`
+                  : 'power draw'}
             </div>
           </div>
 
           <Separator />
 
           <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+            {!utilUnavailable && (
+              <>
+                <Field label="Busy" value={`${gpu.pct.toFixed(0)}%`} />
+                <Field
+                  label="VRAM"
+                  value={`${gpu.vram.used.toFixed(2)} / ${gpu.vram.total.toFixed(0)} ${gpu.vram.unit}`}
+                />
+              </>
+            )}
             {showClocks && (
               <>
                 <Field label="Core" value={gpu.coreMhz ? `${gpu.coreMhz} MHz` : '—'} />
@@ -67,7 +81,7 @@ export function GPUDetail({ gpu }: Props) {
             <Field label="PCIe" value={pcie} {...(pcieMax ? { sub: `max ${pcieMax}` } : {})} />
             {gpu.pstate && <Field label="P-state" value={gpu.pstate} />}
             <Field label="Temp" value={gpu.temp ? `${gpu.temp} °C` : '—'} />
-            <Field label="Fan" value={gpu.fan ? `${gpu.fan}%` : '—'} />
+            <Field label="Fan" value={gpuFanText(gpu)} />
           </div>
 
           {gpu.processes.length > 0 && (

@@ -218,8 +218,9 @@ func readCPUTemp() int {
 	return 0
 }
 
-// collectGPUHeadline reads everything Nouveau (and amdgpu, where applicable)
-// exposes through sysfs and debugfs. util/VRAM stay zero on Nouveau by design.
+// collectGPUHeadline reads what the GPU driver exposes through sysfs and
+// debugfs. amdgpu reports busy %, VRAM and clocks; on Nouveau util/VRAM stay
+// zero because the driver doesn't expose them.
 // ctx is forwarded to the one shell-out (lspciModel → `lspci`) so a stuck
 // invocation can be cancelled on shutdown.
 func collectGPUHeadline(ctx context.Context) GPUHeadline {
@@ -229,21 +230,7 @@ func collectGPUHeadline(ctx context.Context) GPUHeadline {
 			continue
 		}
 		out.Driver = c.name
-		if temp, ok := readSysFloat(filepath.Join(c.dir, "temp1_input")); ok {
-			out.Temp = int(temp / 1000)
-		}
-		// Fan PWM as percentage (0–255 → 0–100).
-		if pwm, ok := readSysFloat(filepath.Join(c.dir, "pwm1")); ok {
-			out.Fan = int(roundTo(100*pwm/255, 0))
-		}
-		// Power draw — hwmon reports microwatts.
-		if p, ok := readSysFloat(filepath.Join(c.dir, "power1_input")); ok {
-			out.PowerW = roundTo(p/1_000_000, 1)
-		}
-		// Core voltage — millivolts.
-		if v, ok := readSysFloat(filepath.Join(c.dir, "in0_input")); ok {
-			out.VoltageV = roundTo(v/1000, 3)
-		}
+		applyGPUHwmon(&out, c.dir)
 		break
 	}
 
@@ -256,15 +243,20 @@ func collectGPUHeadline(ctx context.Context) GPUHeadline {
 		}
 		// PCIe link state lives under /sys/class/drm/cardN/device.
 		out.PCIe = readPCIeLink(addr)
+		// amdgpu: busy %, VRAM and DPM clocks from the same device dir.
+		applyAMDGPU(&out, sysPath("bus", "pci", "devices", addr))
 	} else {
 		out.Name = gpuPrettyName(out.Driver)
 	}
 
-	// GPU clocks + active p-state via Nouveau's debugfs interface (root-only).
-	if cm, mm, ps := readGPUClocks(); cm > 0 || mm > 0 {
-		out.CoreMHz = cm
-		out.MemMHz = mm
-		out.PState = ps
+	// GPU clocks + active p-state via Nouveau's debugfs interface (root-only),
+	// when the driver didn't already report them through sysfs.
+	if out.CoreMHz == 0 && out.MemMHz == 0 {
+		if cm, mm, ps := readGPUClocks(); cm > 0 || mm > 0 {
+			out.CoreMHz = cm
+			out.MemMHz = mm
+			out.PState = ps
+		}
 	}
 
 	// Processes with /dev/dri/* open. Bounded by the same proc-walk we already

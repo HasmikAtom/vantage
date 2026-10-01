@@ -11,6 +11,7 @@ import { GPUDetail } from '../GPUDetail';
 import { CPUDetail } from '../CPUDetail';
 import { CloudflareRefreshButton } from '../CloudflareRefreshButton';
 import type { FloatingTooltip } from '@/hooks/useTooltip';
+import { gpuFanText } from '@/lib/gpu';
 
 export interface OverviewTabProps {
   snapshot: DashboardSnapshot;
@@ -199,8 +200,8 @@ export const OverviewTab = ({ snapshot, tt, onTunnelClick, activeServerId, serve
           const utilUnavailable =
             h.gpu.driver === 'nouveau' || (h.gpu.pct === 0 && h.gpu.vram.total === 0);
           const sub = utilUnavailable
-            ? `${h.gpu.powerW ? h.gpu.powerW.toFixed(1) + ' W draw' : '—'} · fan ${h.gpu.fan}%`
-            : `${h.gpu.vram.used}/${h.gpu.vram.total} ${h.gpu.vram.unit} VRAM · fan ${h.gpu.fan}%`;
+            ? `${h.gpu.powerW ? h.gpu.powerW.toFixed(1) + ' W draw' : '—'} · fan ${gpuFanText(h.gpu)}`
+            : `${h.gpu.vram.used.toFixed(1)}/${h.gpu.vram.total.toFixed(0)} ${h.gpu.vram.unit} VRAM · fan ${gpuFanText(h.gpu)}`;
           const unavailableNote = utilUnavailable
             ? `Utilization / VRAM not exposed by the ${
                 h.gpu.driver || 'open-source'

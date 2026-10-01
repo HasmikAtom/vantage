@@ -50,6 +50,8 @@ type GPUHeadline struct {
 	// New Nouveau-friendly fields. Some may stay zero on drivers/cards that
 	// don't expose them; the UI treats null/zero gracefully.
 	PowerW       float64       `json:"powerW"`         // current GPU power draw, watts
+	PowerCapW    float64       `json:"powerCapW"`      // board power limit, watts (0 = unknown)
+	FanRPM       int           `json:"fanRpm"`         // fan speed, RPM (0 = not reported)
 	VoltageV     float64       `json:"voltageV"`       // GPU core voltage, volts
 	CoreMHz      int           `json:"coreMhz"`        // current core clock
 	MemMHz       int           `json:"memMhz"`         // current memory clock

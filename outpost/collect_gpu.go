@@ -60,12 +60,8 @@ var (
 	lspciCacheUntil time.Time
 )
 
-// lspciModel runs `lspci -nn -s <addr>` once per hour and extracts the
-// human chip name (the text inside the first `[...]` after the colon).
-// Example raw line:
-//   01:00.0 VGA compatible controller [0300]: NVIDIA Corporation GK106 [GeForce GTX 660] [10de:11c0] (rev a1)
-// We return "NVIDIA Corporation GK106 [GeForce GTX 660]" — the device-class
-// bracket gets stripped, the vendor:device bracket is dropped.
+// lspciModel runs `lspci -vmm -s <addr>` once per hour and returns a short
+// display name such as "AMD Radeon RX 570 Armor 8G OC" (see gpuNameFromVmm).
 func lspciModel(ctx context.Context, addr string) string {
 	lspciCacheMu.RLock()
 	if lspciCacheKey == addr && time.Now().Before(lspciCacheUntil) {
@@ -80,11 +76,11 @@ func lspciModel(ctx context.Context, addr string) string {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "lspci", "-nn", "-s", addr).Output()
+	out, err := exec.CommandContext(ctx, "lspci", "-vmm", "-s", addr).Output()
 	if err != nil {
 		return ""
 	}
-	model := parseLspciModel(string(out))
+	model := gpuNameFromVmm(string(out))
 
 	lspciCacheMu.Lock()
 	lspciCacheKey = addr
@@ -95,23 +91,48 @@ func lspciModel(ctx context.Context, addr string) string {
 	return model
 }
 
-// parseLspciModel pulls the friendly name out of an `lspci -nn -s` line.
-// Strips the device-class brackets (after the slot), then drops the trailing
-// vendor:device bracket and "(rev XX)" suffix.
-func parseLspciModel(line string) string {
-	line = strings.TrimSpace(line)
-	// drop everything up to the first ": "
-	if i := strings.Index(line, ": "); i > 0 {
-		line = line[i+2:]
+// gpuNameFromVmm builds a display name from `lspci -vmm` output: a short
+// vendor plus the board model from the subsystem line ("Radeon RX 570 Armor
+// 8G OC"), or else the marketing name in the device line's brackets
+// ("Ellesmere [Radeon RX 470/480/570…]" → "Radeon RX 470/480/570…"), or
+// else the device line itself. lspci prints "Device 341b" for a subsystem
+// it doesn't know; that is skipped.
+func gpuNameFromVmm(out string) string {
+	fields := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if k, v, ok := strings.Cut(line, ":"); ok {
+			fields[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
 	}
-	// drop trailing vendor:device bracket "[10de:11c0]" and rev
-	if i := strings.LastIndex(line, " ["); i > 0 {
-		line = line[:i]
+	vendor := shortGPUVendor(fields["Vendor"])
+	model := fields["SDevice"]
+	if model == "" || unknownPCIName.MatchString(model) {
+		model = fields["Device"]
+		if i, j := strings.Index(model, "["), strings.LastIndex(model, "]"); i >= 0 && j > i {
+			model = model[i+1 : j]
+		}
 	}
-	if i := strings.Index(line, " (rev "); i > 0 {
-		line = line[:i]
+	if model == "" || unknownPCIName.MatchString(model) {
+		return ""
 	}
-	return strings.TrimSpace(line)
+	if vendor == "" || strings.HasPrefix(strings.ToLower(model), strings.ToLower(vendor)) {
+		return model
+	}
+	return vendor + " " + model
+}
+
+var unknownPCIName = regexp.MustCompile(`^Device [0-9a-fA-F]{4}$`)
+
+func shortGPUVendor(v string) string {
+	switch {
+	case strings.Contains(v, "AMD"), strings.Contains(v, "ATI"):
+		return "AMD"
+	case strings.Contains(v, "NVIDIA"):
+		return "NVIDIA"
+	case strings.Contains(v, "Intel"):
+		return "Intel"
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -258,3 +279,90 @@ func listGPUProcesses() []GPUProcess {
 	}
 	return out
 }
+
+// ---------------------------------------------------------------------------
+// hwmon: temperature, fan, power, voltage
+// ---------------------------------------------------------------------------
+
+// applyGPUHwmon fills the fields a GPU's hwmon directory reports. Files a
+// driver doesn't provide leave their field at zero.
+func applyGPUHwmon(out *GPUHeadline, dir string) {
+	if temp, ok := readSysFloat(filepath.Join(dir, "temp1_input")); ok {
+		out.Temp = int(temp / 1000)
+	}
+	// Fan PWM as a percentage of the driver's range (0–255 when unstated).
+	if pwm, ok := readSysFloat(filepath.Join(dir, "pwm1")); ok {
+		max, ok := readSysFloat(filepath.Join(dir, "pwm1_max"))
+		if !ok || max <= 0 {
+			max = 255
+		}
+		out.Fan = int(roundTo(100*pwm/max, 0))
+	}
+	if rpm, ok := readSysFloat(filepath.Join(dir, "fan1_input")); ok {
+		out.FanRPM = int(rpm)
+	}
+	// Power in microwatts: the driver's average when it has one (amdgpu on
+	// older kernels), else the instant reading.
+	if p, ok := readSysFloat(filepath.Join(dir, "power1_average")); ok {
+		out.PowerW = roundTo(p/1_000_000, 1)
+	} else if p, ok := readSysFloat(filepath.Join(dir, "power1_input")); ok {
+		out.PowerW = roundTo(p/1_000_000, 1)
+	}
+	if p, ok := readSysFloat(filepath.Join(dir, "power1_cap")); ok {
+		out.PowerCapW = roundTo(p/1_000_000, 0)
+	}
+	// Core voltage — millivolts.
+	if v, ok := readSysFloat(filepath.Join(dir, "in0_input")); ok {
+		out.VoltageV = roundTo(v/1000, 3)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// amdgpu: busy %, VRAM and DPM clocks from the PCI device directory
+// ---------------------------------------------------------------------------
+
+// applyAMDGPU reads amdgpu's sysfs files in devDir. On other drivers the
+// files don't exist and nothing is changed.
+func applyAMDGPU(out *GPUHeadline, devDir string) {
+	if busy, ok := readSysFloat(filepath.Join(devDir, "gpu_busy_percent")); ok {
+		out.Pct = busy
+	}
+	used, okU := readSysFloat(filepath.Join(devDir, "mem_info_vram_used"))
+	total, okT := readSysFloat(filepath.Join(devDir, "mem_info_vram_total"))
+	if okU && okT && total > 0 {
+		const gb = 1 << 30
+		out.VRAM = VRAM{Used: roundTo(used/gb, 2), Total: roundTo(total/gb, 2), Unit: "GB"}
+	}
+	if b, err := os.ReadFile(filepath.Join(devDir, "pp_dpm_sclk")); err == nil {
+		if mhz, level, levels := parseDPM(string(b)); mhz > 0 {
+			out.CoreMHz = mhz
+			out.PState = strconv.Itoa(level) + " of " + strconv.Itoa(levels-1)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(devDir, "pp_dpm_mclk")); err == nil {
+		if mhz, _, _ := parseDPM(string(b)); mhz > 0 {
+			out.MemMHz = mhz
+		}
+	}
+}
+
+// parseDPM reads an amdgpu pp_dpm_* list ("0: 300Mhz *" per level, the
+// active one starred) and returns the active clock, its level, and how many
+// levels there are. mhz is 0 when no level is marked active.
+func parseDPM(s string) (mhz, level, levels int) {
+	for _, line := range strings.Split(s, "\n") {
+		m := dpmLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		levels++
+		if m[3] == "*" {
+			level, _ = strconv.Atoi(m[1])
+			mhz, _ = strconv.Atoi(m[2])
+		}
+	}
+	return mhz, level, levels
+}
+
+var dpmLine = regexp.MustCompile(`^\s*(\d+):\s*(\d+)\s*[Mm][Hh]z\s*(\*?)`)
+

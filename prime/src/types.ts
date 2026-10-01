@@ -48,6 +48,10 @@ export interface GpuHeadline {
   temp: number;
   fan: number;
   powerW: number;
+  // Board power limit and fan RPM; absent from older outposts, 0 when the
+  // driver doesn't report them.
+  powerCapW?: number;
+  fanRpm?: number;
   voltageV: number;
   coreMhz: number;
   memMhz: number;
