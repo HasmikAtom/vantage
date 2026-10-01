@@ -73,7 +73,7 @@ export function AddressBar(p: AddressBarProps) {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b bg-muted/30 px-2 py-1.5">
+    <div className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b bg-muted/30 px-2 py-1">
       {p.serverPicker}
       {p.onToggleSidebar && (
         <Button size="xs" variant="ghost" className="md:hidden" onClick={p.onToggleSidebar} title="Folders">
@@ -89,80 +89,83 @@ export function AddressBar(p: AddressBarProps) {
       <Button size="xs" variant="ghost" disabled={p.path === '/'} onClick={p.onUp} title="Up (Backspace)">
         <ArrowUpIcon size={12} />
       </Button>
-      <div className="min-w-[16rem] flex-1 basis-64">
-        {editing ? (
-          <div className="relative">
-            <Input
-              autoFocus
-              value={text}
-              // Read-only (not disabled) while checking, so focus stays and a
-              // wrong path can be corrected or dismissed with Esc right away.
-              readOnly={busy}
-              onChange={(e) => {
-                setText(e.target.value);
-                setErr(null);
-              }}
-              onFocus={(e) => e.currentTarget.select()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void submit();
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  setEditing(false);
+      {/* Path + refresh wrap as one unit, so refresh never ends up alone. */}
+      <div className="flex min-w-[10rem] flex-1 basis-40 items-center gap-1">
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <div className="relative">
+              <Input
+                autoFocus
+                value={text}
+                // Read-only (not disabled) while checking, so focus stays and a
+                // wrong path can be corrected or dismissed with Esc right away.
+                readOnly={busy}
+                onChange={(e) => {
+                  setText(e.target.value);
                   setErr(null);
-                }
+                }}
+                onFocus={(e) => e.currentTarget.select()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void submit();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setEditing(false);
+                    setErr(null);
+                  }
+                }}
+                onBlur={() => {
+                  if (!busy) {
+                    setEditing(false);
+                    setErr(null);
+                  }
+                }}
+                aria-invalid={err ? true : undefined}
+                // Same box as the breadcrumbs (the shared Input is taller and
+                // wider-padded), so focusing the bar doesn't resize the row.
+                className={cn('!h-7 !rounded !px-1 !py-0 font-mono !text-xs', err && 'border-destructive')}
+              />
+              {/* Floats under the box instead of pushing the row taller. */}
+              {err && (
+                <div className="absolute left-0 top-full z-20 mt-0.5 rounded border bg-popover px-1.5 py-0.5 text-[10px] text-destructive shadow">
+                  {err}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              ref={crumbsRef}
+              className="flex h-7 min-w-0 cursor-text items-center overflow-hidden rounded border border-primary/40 px-1 font-mono text-xs hover:border-border"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) startEdit();
               }}
-              onBlur={() => {
-                if (!busy) {
-                  setEditing(false);
-                  setErr(null);
-                }
-              }}
-              aria-invalid={err ? true : undefined}
-              // Same box as the breadcrumbs (the shared Input is taller and
-              // wider-padded), so focusing the bar doesn't resize the row.
-              className={cn('!h-7 !rounded !px-1 !py-0 font-mono !text-xs', err && 'border-destructive')}
-            />
-            {/* Floats under the box instead of pushing the row taller. */}
-            {err && (
-              <div className="absolute left-0 top-full z-20 mt-0.5 rounded border bg-popover px-1.5 py-0.5 text-[10px] text-destructive shadow">
-                {err}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div
-            ref={crumbsRef}
-            className="flex h-7 min-w-0 cursor-text items-center overflow-hidden rounded border border-primary/40 px-1 font-mono text-xs hover:border-border"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) startEdit();
-            }}
-            title="Click to type a path (Ctrl+L)"
-          >
-            {ancestorsOf(p.path).map((dir, i, all) => (
-              <React.Fragment key={dir}>
-                {i > 1 && <span className="shrink-0 px-0.5 text-muted-foreground/50">/</span>}
-                <button
-                  type="button"
-                  {...(p.dropPropsFor?.(dir) ?? {})}
-                  onClick={() => p.onNavigate(dir)}
-                  className={cn(
-                    'shrink-0 whitespace-nowrap rounded px-1 hover:bg-muted',
-                    i === all.length - 1 && 'font-semibold',
-                    p.dropTarget === dir && 'bg-primary/10 ring-1 ring-primary',
-                  )}
-                >
-                  {dir === '/' ? '/' : baseName(dir)}
-                </button>
-              </React.Fragment>
-            ))}
-          </div>
-        )}
+              title="Click to type a path (Ctrl+L)"
+            >
+              {ancestorsOf(p.path).map((dir, i, all) => (
+                <React.Fragment key={dir}>
+                  {i > 1 && <span className="shrink-0 px-0.5 text-muted-foreground/50">/</span>}
+                  <button
+                    type="button"
+                    {...(p.dropPropsFor?.(dir) ?? {})}
+                    onClick={() => p.onNavigate(dir)}
+                    className={cn(
+                      'shrink-0 whitespace-nowrap rounded px-1 hover:bg-muted',
+                      i === all.length - 1 && 'font-semibold',
+                      p.dropTarget === dir && 'bg-primary/10 ring-1 ring-primary',
+                    )}
+                  >
+                    {dir === '/' ? '/' : baseName(dir)}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+        </div>
+        <Button size="xs" variant="ghost" onClick={p.onRefresh} title={p.refreshTitle ?? 'Refresh (F5)'}>
+          <RefreshIcon size={11} />
+        </Button>
       </div>
-      <Button size="xs" variant="ghost" onClick={p.onRefresh} title={p.refreshTitle ?? 'Refresh (F5)'}>
-        <RefreshIcon size={11} />
-      </Button>
       {p.children}
     </div>
   );

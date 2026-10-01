@@ -409,7 +409,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
               <UsersTab snapshot={snapshot} tt={tt} />
             </React.Suspense>
           </TabsContent>
-          <TabsContent value="files" className="mt-0">
+          {/* !mt-0: the shared TabsContent's own mt-4 otherwise wins over mt-0. */}
+          <TabsContent value="files" className="!mt-0">
             <React.Suspense fallback={<TabLoading />}>
               <FilesTab serverId={activeServerId} servers={servers} onSelectServer={setActiveServerId} />
             </React.Suspense>

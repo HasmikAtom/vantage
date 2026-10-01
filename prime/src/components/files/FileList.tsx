@@ -100,9 +100,9 @@ export function FileList(p: FileListProps) {
         p.onContextMenu(e, null);
       }}
     >
-      {/* Compact rows: 32 px instead of the shared table's 41 px. */}
+      {/* Compact rows: 32 px instead of the shared table's 41 px; 28 px header. */}
       {p.error ?? (
-        <Table className="[&_td]:py-1.5 [&_th]:h-8" containerClassName="">
+        <Table className="[&_td]:py-1.5 [&_th]:h-7" containerClassName="">
           {/* Column headers stay visible while the list scrolls. */}
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>

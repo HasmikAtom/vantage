@@ -86,7 +86,9 @@ export function Toolbar(p: ToolbarProps) {
               p.onQuery('');
             }
           }}
-          className="!h-7 w-36 min-w-[5rem] shrink !px-2 !text-xs"
+          // ! overrides: the shared Input is w-full / h-9, which otherwise win
+          // and stretch the box across its own line.
+          className="!h-7 !w-36 min-w-[5rem] shrink !px-2 !text-xs"
         />
         <label className="flex cursor-pointer items-center gap-1 whitespace-nowrap text-[10px] text-muted-foreground">
           <input
