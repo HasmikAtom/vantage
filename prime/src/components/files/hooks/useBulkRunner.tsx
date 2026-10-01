@@ -18,6 +18,8 @@ export interface RunBulkOptions {
   // Runs after every pass, including a "Retry failed" pass, so callers can
   // finish work that depends on the outcome (e.g. deleting moved sources).
   onSettled?: (states: ItemState[]) => void | Promise<void>;
+  // The caller already holds the operation slot (see claim()).
+  claimed?: boolean;
 }
 
 export type RunBulk = (title: string, items: BulkItem[], op: BulkOp, opts?: RunBulkOptions) => Promise<ItemState[]>;
@@ -52,7 +54,11 @@ export function useBulkRunner(
 ): {
   runBulk: RunBulk;
   askConflict: AskConflict;
-  isBusy: () => boolean;
+  // Hold the one-operation slot across a longer job (a cross-server copy
+  // scans and prompts before its runBulk); runBulk({claimed:true}) takes it
+  // over, release() gives it back if the job stops before that.
+  claim: () => boolean;
+  release: () => void;
   dialogs: React.ReactNode;
 } {
   const [view, setView] = React.useState<ViewState | null>(null);
@@ -65,7 +71,14 @@ export function useBulkRunner(
   const shown = React.useRef(false);
   const onBusyRef = React.useRef(onBusy);
   onBusyRef.current = onBusy;
-  const isBusy = React.useCallback(() => busy.current, []);
+  const claim = React.useCallback(() => {
+    if (busy.current || !mounted.current) return false;
+    busy.current = true;
+    return true;
+  }, []);
+  const release = React.useCallback(() => {
+    busy.current = false;
+  }, []);
 
   const askConflict = React.useCallback<AskConflict>(
     (item) =>
@@ -98,12 +111,19 @@ export function useBulkRunner(
 
   const runBulk = React.useCallback<RunBulk>(
     async (title, items, op, opts = {}) => {
-      if (busy.current) {
+      // Nothing would show or control a run started after the explorer
+      // closed (e.g. a cross-server copy still preparing when the user
+      // switched tab).
+      if (!mounted.current) {
+        return items.map((item): ItemState => ({ item, status: 'cancelled', error: null }));
+      }
+      if (busy.current && !opts.claimed) {
         onBusyRef.current?.();
         return items.map((item): ItemState => ({ item, status: 'cancelled', error: null }));
       }
       if (items.length === 0) {
         await opts.onSettled?.([]);
+        if (opts.claimed) busy.current = false;
         return [];
       }
       busy.current = true;
@@ -199,5 +219,5 @@ export function useBulkRunner(
     </>
   );
 
-  return { runBulk, askConflict, isBusy, dialogs };
+  return { runBulk, askConflict, claim, release, dialogs };
 }

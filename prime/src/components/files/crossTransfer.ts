@@ -67,8 +67,10 @@ export interface CrossDeps {
   // Sources that were moved (copied and then trashed at the source),
   // reported after each pass including retries.
   onMoved?: (serverId: string, paths: string[]) => void;
-  // True while another operation still holds the progress dialog.
-  isBusy?: () => boolean;
+  // The one-operation slot (useBulkRunner.claim/release): held for the
+  // whole run so a local operation can't start mid-scan or mid-prompt.
+  claim?: () => boolean;
+  release?: () => void;
   // Aborting cancels the run while it is still scanning/preparing.
   signal?: AbortSignal;
   afterMutation(serverId: string, dirs: readonly string[]): Promise<void>;
@@ -100,16 +102,20 @@ export async function runCrossTransfer(
     d.onError('Another cross-server copy is already running — wait for it to finish.');
     return [];
   }
-  if (d.isBusy?.()) {
+  if (d.claim && !d.claim()) {
     d.onError('Finish or close the current operation first.');
     return [];
   }
   active = true;
+  const ctx = { handedOff: false };
   try {
-    return await crossRun(d, src, dst, mode);
+    return await crossRun(d, src, dst, mode, ctx);
   } finally {
     active = false;
     d.onStatus?.(null);
+    // runBulk took the slot over (it frees it when its dialog closes);
+    // otherwise the run stopped early and gives it back here.
+    if (!ctx.handedOff) d.release?.();
   }
 }
 
@@ -118,6 +124,7 @@ async function crossRun(
   src: { serverId: string; items: readonly CrossSource[] },
   dst: { serverId: string; dir: string; label?: string },
   mode: 'copy' | 'move',
+  ctx: { handedOff: boolean },
 ): Promise<string[]> {
   const verb = mode === 'copy' ? 'Copy' : 'Move';
   const notes: string[] = [];
@@ -207,13 +214,27 @@ async function crossRun(
     }
   }
 
-  // Recreate folders, parents first.
+  if (isCancelled()) {
+    d.onError(cancelledNote);
+    return [];
+  }
+
+  // Recreate folders, parents first. Cancel is still honoured here; some
+  // folders may exist by then, so the message says so.
+  const partlyCancelled = `${verb} cancelled — some folders may already have been created.`;
+  d.onStatus?.('Creating folders…');
   for (const t of plan.tops) {
     const tgt = target.get(t.path);
     if (!tgt || !t.isDir) continue;
     const root = joinPath(dst.dir, tgt.name);
     try {
-      for (const rel of ['', ...t.dirs]) await mkdirOk(d.api, dst.serverId, joinRel(root, rel));
+      for (const rel of ['', ...t.dirs]) {
+        if (isCancelled()) {
+          d.onError(partlyCancelled);
+          return [];
+        }
+        await mkdirOk(d.api, dst.serverId, joinRel(root, rel));
+      }
     } catch (e) {
       notes.push(`Could not create ${tgt.name} on the destination: ${msg(e)}`);
       target.delete(t.path);
@@ -263,10 +284,17 @@ async function crossRun(
     flush();
   };
 
+  d.onStatus?.(null);
+  if (isCancelled()) {
+    d.onError(partlyCancelled);
+    return [];
+  }
+
   // One transfer per file, two at a time.
   const files = plan.files.filter((f) => target.has(f.top));
   const byId = new Map(files.map((f) => [f.srcPath, f]));
   const running = new Set<string>();
+  ctx.handedOff = true;
   await d.runBulk(
     `${mode === 'copy' ? 'Copying' : 'Moving'} ${files.length} ${files.length === 1 ? 'file' : 'files'} to another server`,
     files.map((f) => ({ id: f.srcPath, label: f.rel ? `${baseName(f.top)}/${f.rel}` : baseName(f.top) })),
@@ -289,7 +317,12 @@ async function crossRun(
           // Gate forgot the transfer (restart, or the tab slept past its
           // retention): trust the destination if the file is complete.
           const forgotten = typeof e === 'object' && e !== null && (e as { unknownTransfer?: unknown }).unknownTransfer === true;
-          const there = forgotten && d.api.stat ? await d.api.stat(dst.serverId, f.rel ? joinRel(top, f.rel) : top) : null;
+          // Only when nothing was at that path before: after Replace an old
+          // same-size file would look exactly like a finished copy.
+          const there =
+            forgotten && !tgt.overwrite && d.api.stat
+              ? await d.api.stat(dst.serverId, f.rel ? joinRel(top, f.rel) : top)
+              : null;
           if (!there || there.size !== f.size) throw e;
         }
         done.add(item.id);
@@ -298,6 +331,7 @@ async function crossRun(
       }
     },
     {
+      claimed: true,
       concurrency: 2,
       onCancel: () => {
         for (const id of running) void d.api.cancelTransfer(id).catch(() => {});

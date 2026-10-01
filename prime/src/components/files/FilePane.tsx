@@ -170,7 +170,7 @@ export function FilePane(p: FilePaneProps) {
   // --- keyboard ---------------------------------------------------------------
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (p.blocked) return;
-    if (ignoresExplorerKeys(e.target as HTMLElement)) return;
+    if (ignoresExplorerKeys(e.target as HTMLElement, e.key)) return;
     const s = shortcutFor(e, p.canControl, p.split, e.target === e.currentTarget);
     if (!s) {
       const ch = typeAheadChar(e);

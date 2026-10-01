@@ -253,7 +253,7 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
 
   const onError = React.useCallback((m: string) => setBanner(m), []);
   const onBusy = React.useCallback(() => setBanner('Finish or close the current operation first.'), []);
-  const { runBulk, askConflict, isBusy, dialogs: bulkDialogs } = useBulkRunner(bump, onBusy);
+  const { runBulk, askConflict, claim, release, dialogs: bulkDialogs } = useBulkRunner(bump, onBusy);
   const leftActions = useFileActions({ serverId, runBulk, afterMutation: leftAfter, onError });
   const rightActions = useFileActions({ serverId: rightServerId, runBulk, afterMutation: rightAfter, onError });
   const actionsOf = (pane: PaneId) => (pane === 'right' ? rightActions : leftActions);
@@ -265,7 +265,8 @@ export function FilesTab({ serverId, servers, onSelectServer }: FilesTabProps) {
     confirm: (m) => window.confirm(m),
     onError,
     onStatus: setStatus,
-    isBusy,
+    claim,
+    release,
     // A cut from another server leaves the clipboard only once its items
     // have really moved; whatever was kept stays ready to paste again.
     onMoved: (sid, paths) => {

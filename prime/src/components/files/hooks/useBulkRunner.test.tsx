@@ -79,3 +79,43 @@ describe('useBulkRunner — one operation at a time', () => {
     host.remove();
   });
 });
+
+describe('useBulkRunner — slot and unmount', () => {
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `i${i}`, label: `i${i}` }));
+  function mountRunner() {
+    const api: { r: ReturnType<typeof useBulkRunner> | null } = { r: null };
+    function Probe() {
+      const r = useBulkRunner(() => {}, () => {});
+      api.r = r;
+      return <>{r.dialogs}</>;
+    }
+    const root = createRoot(document.createElement('div'));
+    act(() => root.render(<Probe />));
+    return { api, root };
+  }
+
+  it('a claimed slot refuses other runs but accepts the claimant', async () => {
+    const { api, root } = mountRunner();
+    expect(api.r!.claim()).toBe(true);
+    expect(api.r!.claim()).toBe(false);
+    let other: { status: string }[] = [];
+    await act(async () => { other = await api.r!.runBulk('other', items(1), async () => {}); });
+    expect(other[0]?.status).toBe('cancelled');
+    let mine: { status: string }[] = [];
+    await act(async () => { mine = await api.r!.runBulk('mine', items(1), async () => {}, { claimed: true }); });
+    expect(mine[0]?.status).toBe('done');
+    expect(api.r!.claim()).toBe(true);
+    api.r!.release();
+    act(() => root.unmount());
+  });
+
+  it('refuses to start a run once the explorer has unmounted', async () => {
+    const { api, root } = mountRunner();
+    const runBulk = api.r!.runBulk;
+    act(() => root.unmount());
+    let ran = false;
+    const states = await runBulk('late', items(1), async () => { ran = true; });
+    expect(ran).toBe(false);
+    expect(states[0]?.status).toBe('cancelled');
+  });
+});

@@ -305,8 +305,8 @@ describe('runCrossTransfer — 1.3.1 fixes', () => {
   const file = (path: string, size = 3) => ({ path, isDir: false, size, type: 'file' as const });
   const unknownTransfer = () => Object.assign(new Error('transfer no longer known to the dashboard'), { unknownTransfer: true });
 
-  it('does not start while another operation still holds the progress dialog', async () => {
-    const { d, calls } = setup({ over: { isBusy: () => true } });
+  it('does not start while another operation holds the slot', async () => {
+    const { d, calls } = setup({ over: { claim: () => false } });
     let listed = 0;
     const list = d.api.list;
     d.api.list = async (s, p) => { listed++; return list(s, p); };
@@ -377,5 +377,59 @@ describe('runCrossTransfer — 1.3.1 fixes', () => {
     await runCrossTransfer(next.d, { serverId: A, items: [file('/src/f.txt')] }, { serverId: B, dir: '/dst' }, 'copy');
     expect(next.calls.transfers).toHaveLength(1);
     expect(next.calls.errors.join(' ')).not.toMatch(/already running/);
+  });
+});
+
+describe('runCrossTransfer — third review', () => {
+  const file = (path: string, size = 3) => ({ path, isDir: false, size, type: 'file' as const });
+  const unknownTransfer = () => Object.assign(new Error('transfer no longer known'), { unknownTransfer: true });
+
+  it('does not trust a same-size file at the destination after Replace', async () => {
+    const { d, calls } = setup({
+      existing: { 'f.txt': 'file' },
+      over: { askConflict: async () => ({ choice: 'replace', applyToAll: false }) },
+    });
+    d.api.awaitTransfer = async () => { throw unknownTransfer(); };
+    d.api.stat = async () => ({ size: 3 });
+    await runCrossTransfer(d, { serverId: A, items: [file('/src/f.txt', 3)] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.trash).toEqual([]);
+  });
+
+  it('Cancel while folders are being created stops before any transfer', async () => {
+    const ctrl = new AbortController();
+    const statuses: (string | null)[] = [];
+    const { d, calls } = setup({ over: { signal: ctrl.signal, onStatus: (s) => statuses.push(s) } });
+    d.api.mkdir = async (_s, p) => { calls.mkdir.push(p); ctrl.abort(); };
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'move');
+    expect(calls.mkdir).toEqual(['/dst/logs']);
+    expect(calls.transfers).toEqual([]);
+    expect(calls.trash).toEqual([]);
+    expect(calls.errors[0]).toMatch(/cancelled — some folders may already have been created/);
+    expect(statuses).toContain('Creating folders…');
+  });
+
+  it('holds the operation slot for the whole run and hands it to runBulk', async () => {
+    let held = false;
+    const claimedFlags: (boolean | undefined)[] = [];
+    const handing: RunBulk = async (title, items, op, opts) => {
+      claimedFlags.push(opts?.claimed);
+      return runBulk(title, items, op, opts);
+    };
+    const { d } = setup({
+      over: {
+        runBulk: handing,
+        claim: () => { if (held) return false; held = true; return true; },
+        release: () => { held = false; },
+      },
+    });
+    await runCrossTransfer(d, { serverId: A, items: [logs] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(claimedFlags).toEqual([true]);
+  });
+
+  it('releases the slot when it stops before the transfers start', async () => {
+    let released = 0;
+    const { d } = setup({ over: { claim: () => true, release: () => { released++; }, confirm: () => false } });
+    await runCrossTransfer(d, { serverId: A, items: [{ path: '/src/many', isDir: true, size: 0 }] }, { serverId: B, dir: '/dst' }, 'copy');
+    expect(released).toBe(1);
   });
 });
