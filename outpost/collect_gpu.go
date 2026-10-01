@@ -366,3 +366,83 @@ func parseDPM(s string) (mhz, level, levels int) {
 
 var dpmLine = regexp.MustCompile(`^\s*(\d+):\s*(\d+)\s*[Mm][Hh]z\s*(\*?)`)
 
+
+// ---------------------------------------------------------------------------
+// amdgpu busy % smoothing
+// ---------------------------------------------------------------------------
+//
+// gpu_busy_percent is an instantaneous reading; sampled once per 2 s tick it
+// jumps between 0 and ~95 under bursty load. A background sampler reads it
+// every 100 ms and the headline reports the average of the last 2 s.
+
+type busyWindow struct {
+	mu      sync.Mutex
+	samples []float64
+	next    int
+	full    bool
+}
+
+func newBusyWindow(size int) *busyWindow {
+	return &busyWindow{samples: make([]float64, size)}
+}
+
+func (w *busyWindow) add(v float64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.samples[w.next] = v
+	w.next = (w.next + 1) % len(w.samples)
+	if w.next == 0 {
+		w.full = true
+	}
+}
+
+func (w *busyWindow) avg() (float64, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := w.next
+	if w.full {
+		n = len(w.samples)
+	}
+	if n == 0 {
+		return 0, false
+	}
+	sum := 0.0
+	for _, v := range w.samples[:n] {
+		sum += v
+	}
+	return sum / float64(n), true
+}
+
+var (
+	busySamplersMu sync.Mutex
+	busySamplers   = map[string]*busyWindow{}
+)
+
+// smoothedGPUBusy returns the 2 s average busy % for the amdgpu device in
+// devDir, starting its sampler on first use. ok is false until the sampler
+// has a reading (or when the file doesn't exist), so callers keep the
+// instantaneous value.
+func smoothedGPUBusy(devDir string) (float64, bool) {
+	path := filepath.Join(devDir, "gpu_busy_percent")
+	busySamplersMu.Lock()
+	w, started := busySamplers[path]
+	if !started {
+		if _, err := os.Stat(path); err != nil {
+			busySamplersMu.Unlock()
+			return 0, false
+		}
+		w = newBusyWindow(20)
+		busySamplers[path] = w
+		go func() {
+			t := time.NewTicker(100 * time.Millisecond)
+			defer t.Stop()
+			for range t.C {
+				if v, ok := readSysFloat(path); ok {
+					w.add(v)
+				}
+			}
+		}()
+	}
+	busySamplersMu.Unlock()
+	return w.avg()
+}

@@ -244,7 +244,11 @@ func collectGPUHeadline(ctx context.Context) GPUHeadline {
 		// PCIe link state lives under /sys/class/drm/cardN/device.
 		out.PCIe = readPCIeLink(addr)
 		// amdgpu: busy %, VRAM and DPM clocks from the same device dir.
-		applyAMDGPU(&out, sysPath("bus", "pci", "devices", addr))
+		devDir := sysPath("bus", "pci", "devices", addr)
+		applyAMDGPU(&out, devDir)
+		if busy, ok := smoothedGPUBusy(devDir); ok {
+			out.Pct = roundTo(busy, 1)
+		}
 	} else {
 		out.Name = gpuPrettyName(out.Driver)
 	}

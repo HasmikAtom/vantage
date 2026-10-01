@@ -149,3 +149,22 @@ func TestApplyGPUHwmonFallsBackToInstantPower(t *testing.T) {
 		t.Fatalf("power/fan = %v W %d%%, want 10.2 W 100%%", g.PowerW, g.Fan)
 	}
 }
+
+func TestBusyWindowAverages(t *testing.T) {
+	// gpu_busy_percent is instantaneous; one read per 2 s tick jumps between
+	// 0 and 94 under bursty load. The window smooths it.
+	w := newBusyWindow(4)
+	if _, ok := w.avg(); ok {
+		t.Fatal("an empty window has no average")
+	}
+	for _, v := range []float64{0, 94, 0, 10} {
+		w.add(v)
+	}
+	if got, _ := w.avg(); got != 26 {
+		t.Fatalf("avg = %v, want 26", got)
+	}
+	w.add(50) // the oldest sample (0) drops out
+	if got, _ := w.avg(); got != 38.5 {
+		t.Fatalf("avg after wrap = %v, want 38.5", got)
+	}
+}
