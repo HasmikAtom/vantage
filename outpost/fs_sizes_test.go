@@ -321,3 +321,82 @@ func TestInvalidatesSizes_ClearsOnlyOnSuccess(t *testing.T) {
 		t.Fatal("successful mutation must clear the cache")
 	}
 }
+
+func TestWalkDirSize_ReportsProgressWhileRunning(t *testing.T) {
+	// Big trees (e.g. a mergerfs pool with ~500k entries) take tens of
+	// seconds; the running total is reported along the way so the row
+	// shows a growing "≥ …" instead of nothing.
+	root, _ := fsOpsTestEnv(t)
+	writeSized(t, filepath.Join(root, "d/a/1.bin"), 10)
+	writeSized(t, filepath.Join(root, "d/b/2.bin"), 20)
+	writeSized(t, filepath.Join(root, "d/c/3.bin"), 30)
+
+	var seen []dirSizeResult
+	lim := sizeLimits{MaxDuration: time.Minute, MaxEntries: 100, ProgressEvery: -time.Nanosecond}
+	res, err := walkDirSizeProgress(context.Background(), "/d", lim, func(r dirSizeResult) { seen = append(seen, r) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) == 0 {
+		t.Fatal("no progress reported")
+	}
+	var last int64
+	for _, p := range seen {
+		if !p.Running || !p.Partial || p.Path != "/d" {
+			t.Fatalf("progress %+v should be a running, partial result for /d", p)
+		}
+		if p.Bytes < last {
+			t.Fatalf("progress went backwards: %+v", seen)
+		}
+		last = p.Bytes
+	}
+	if res.Running || res.Partial || res.Bytes != 60 || res.Files != 3 {
+		t.Fatalf("final %+v, want complete 60 bytes / 3 files, not running", res)
+	}
+}
+
+func TestDefaultSizeLimits_AllowLargeTrees(t *testing.T) {
+	// 10 s cut a ~480k-entry pool off at ~51k entries (≥ 2.4 TB of 7.6 TB).
+	if defaultSizeLimits.MaxDuration < time.Minute {
+		t.Fatalf("MaxDuration = %v, want at least a minute", defaultSizeLimits.MaxDuration)
+	}
+	if defaultSizeLimits.ProgressEvery <= 0 || defaultSizeLimits.ProgressEvery > 2*time.Second {
+		t.Fatalf("ProgressEvery = %v, want about a second", defaultSizeLimits.ProgressEvery)
+	}
+}
+
+func TestFsSizesHandler_SendsProgressBeforeTheFinalSize(t *testing.T) {
+	root, _ := fsOpsTestEnv(t)
+	resetSizeCache(t)
+	writeSized(t, filepath.Join(root, "top/a/x/1.bin"), 10)
+	writeSized(t, filepath.Join(root, "top/a/y/2.bin"), 5)
+	lim := defaultSizeLimits
+	lim.ProgressEvery = -time.Nanosecond
+
+	req := httptest.NewRequest(http.MethodGet, "/fs/sizes?path=/top", nil)
+	rec := httptest.NewRecorder()
+	fsSizesHandlerWith(lim)(rec, req)
+
+	evs := parseSSE(rec.Body.String())
+	if len(evs) < 3 || evs[len(evs)-1].name != "done" {
+		t.Fatalf("events = %+v, want progress, final, done", evs)
+	}
+	var results []dirSizeResult
+	for _, ev := range evs[:len(evs)-1] {
+		var r dirSizeResult
+		if err := json.Unmarshal([]byte(ev.data), &r); err != nil {
+			t.Fatal(err)
+		}
+		results = append(results, r)
+	}
+	final := results[len(results)-1]
+	if final.Running || final.Bytes != 15 {
+		t.Fatalf("last event %+v, want the complete 15 bytes", final)
+	}
+	if !results[0].Running {
+		t.Fatalf("first event %+v, want a running progress update", results[0])
+	}
+	if c, ok := dirSizeCache.get("/top/a"); !ok || c.Running || c.Bytes != 15 {
+		t.Fatalf("cache = %+v %v, want only the final result", c, ok)
+	}
+}

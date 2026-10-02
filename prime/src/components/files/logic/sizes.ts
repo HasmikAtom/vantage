@@ -5,7 +5,8 @@ import { formatBytes } from '../fsPath';
 
 export type SizeInfo =
   | { state: 'pending' }
-  | { state: 'done'; bytes: number; partial: boolean }
+  // running: a progress update, the walk is still counting (only set when true).
+  | { state: 'done'; bytes: number; partial: boolean; running?: true }
   | { state: 'none' };
 
 export type SizeMap = ReadonlyMap<string, SizeInfo>;
@@ -15,6 +16,8 @@ export interface SizeEvent {
   bytes: number;
   files: number;
   partial: boolean;
+  // Progress update from a walk that's still going (outposts 1.4.10+).
+  running?: boolean;
 }
 
 export function initialSizes(dirPaths: readonly string[], supported: boolean): Map<string, SizeInfo> {
@@ -24,13 +27,24 @@ export function initialSizes(dirPaths: readonly string[], supported: boolean): M
 
 export function applySizeEvent(m: SizeMap, ev: SizeEvent): Map<string, SizeInfo> {
   const next = new Map(m);
-  if (next.has(ev.path)) next.set(ev.path, { state: 'done', bytes: ev.bytes, partial: ev.partial });
+  if (next.has(ev.path)) {
+    next.set(
+      ev.path,
+      ev.running
+        ? { state: 'done', bytes: ev.bytes, partial: true, running: true }
+        : { state: 'done', bytes: ev.bytes, partial: ev.partial },
+    );
+  }
   return next;
 }
 
 export function settleSizes(m: SizeMap): Map<string, SizeInfo> {
   const next = new Map(m);
-  for (const [k, v] of next) if (v.state === 'pending') next.set(k, { state: 'none' });
+  for (const [k, v] of next) {
+    if (v.state === 'pending') next.set(k, { state: 'none' });
+    // The stream ended mid-count: the last total is a lower bound.
+    else if (v.state === 'done' && v.running) next.set(k, { state: 'done', bytes: v.bytes, partial: true });
+  }
   return next;
 }
 
@@ -47,5 +61,5 @@ export function onStreamError(
 export function formatDirSize(info: SizeInfo | undefined): string {
   if (!info || info.state === 'none') return '—';
   if (info.state === 'pending') return '';
-  return (info.partial ? '≥ ' : '') + formatBytes(info.bytes);
+  return (info.partial ? '≥ ' : '') + formatBytes(info.bytes) + (info.running ? '…' : '');
 }

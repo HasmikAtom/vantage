@@ -32,14 +32,22 @@ type dirSizeResult struct {
 	Bytes   int64  `json:"bytes"`
 	Files   int64  `json:"files"`
 	Partial bool   `json:"partial"`
+	// Running marks a progress update: the walk is still going and Bytes
+	// is the total so far. The final result for a path never has it.
+	Running bool `json:"running,omitempty"`
 }
 
 type sizeLimits struct {
 	MaxDuration time.Duration
 	MaxEntries  int64
+	// How often a running walk reports its total so far (0 = never).
+	ProgressEvery time.Duration
 }
 
-var defaultSizeLimits = sizeLimits{MaxDuration: 10 * time.Second, MaxEntries: 2_000_000}
+// A minute covers large pools (a ~480k-entry mergerfs tree takes ~7 s
+// natively, longer through /hostfs); 10 s cut such a tree off at a third.
+// Progress every second keeps the row moving meanwhile.
+var defaultSizeLimits = sizeLimits{MaxDuration: time.Minute, MaxEntries: 2_000_000, ProgressEvery: time.Second}
 
 type fileID struct{ dev, ino uint64 }
 
@@ -57,6 +65,12 @@ var statIDs = func(fi os.FileInfo) (dev, ino, nlink uint64, ok bool) {
 // ctx.Err() when the caller goes away, and a Partial result (not an
 // error) when a cap is hit. Unreadable subdirectories are skipped.
 func walkDirSize(ctx context.Context, hostPath string, lim sizeLimits) (dirSizeResult, error) {
+	return walkDirSizeProgress(ctx, hostPath, lim, nil)
+}
+
+// walkDirSizeProgress is walkDirSize that also calls progress with the
+// running total (Partial and Running set) every lim.ProgressEvery.
+func walkDirSizeProgress(ctx context.Context, hostPath string, lim sizeLimits, progress func(dirSizeResult)) (dirSizeResult, error) {
 	res := dirSizeResult{Path: hostPath}
 	if err := ctx.Err(); err != nil {
 		return res, err
@@ -75,6 +89,7 @@ func walkDirSize(ctx context.Context, hostPath string, lim sizeLimits) (dirSizeR
 	}
 
 	deadline := time.Now().Add(lim.MaxDuration)
+	nextProgress := time.Now().Add(lim.ProgressEvery)
 	seenFiles := map[fileID]struct{}{}
 	seenDirs := map[fileID]struct{}{{rootDev, rootIno}: {}}
 	type dir struct{ rel, host string }
@@ -89,11 +104,26 @@ func walkDirSize(ctx context.Context, hostPath string, lim sizeLimits) (dirSizeR
 			res.Partial = true
 			return res, nil
 		}
+		if progress != nil && lim.ProgressEvery != 0 && !time.Now().Before(nextProgress) {
+			snap := res
+			snap.Partial, snap.Running = true, true
+			progress(snap)
+			nextProgress = time.Now().Add(lim.ProgressEvery)
+		}
 		d := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
-		f, err := hostRootHandle.Open(d.rel)
+		// Open the folder as its own root and look its entries up relative
+		// to it: one step per entry. Looking each one up by its full path
+		// from the host root re-resolved every parent folder, which through
+		// a FUSE pool (mergerfs) made deep trees ~20x slower to walk.
+		dr, err := hostRootHandle.OpenRoot(d.rel)
 		if err != nil {
+			continue
+		}
+		f, err := dr.Open(".")
+		if err != nil {
+			_ = dr.Close()
 			continue
 		}
 		names, _ := f.Readdirnames(-1)
@@ -101,15 +131,18 @@ func walkDirSize(ctx context.Context, hostPath string, lim sizeLimits) (dirSizeR
 
 		for _, n := range names {
 			if visited >= lim.MaxEntries {
+				_ = dr.Close()
 				res.Partial = true
 				return res, nil
 			}
 			visited++
 			if visited%1024 == 0 {
 				if err := ctx.Err(); err != nil {
+					_ = dr.Close()
 					return res, err
 				}
 				if time.Now().After(deadline) {
+					_ = dr.Close()
 					res.Partial = true
 					return res, nil
 				}
@@ -119,7 +152,7 @@ func walkDirSize(ctx context.Context, hostPath string, lim sizeLimits) (dirSizeR
 				continue
 			}
 			cRel := joinRootRel(d.rel, n)
-			ci, err := hostRootHandle.Lstat(cRel)
+			ci, err := dr.Lstat(n)
 			if err != nil {
 				continue
 			}
@@ -150,6 +183,7 @@ func walkDirSize(ctx context.Context, hostPath string, lim sizeLimits) (dirSizeR
 				stack = append(stack, dir{cRel, cHost})
 			}
 		}
+		_ = dr.Close()
 	}
 	return res, nil
 }
@@ -241,7 +275,11 @@ const sizeWalkersPerStream = 2
 // fsSizesHandler streams one event per immediate subdirectory of path,
 // cached results first, then `event: done`. Denylisted and failing
 // children are omitted. The walk stops when the client disconnects.
-func fsSizesHandler() http.HandlerFunc {
+func fsSizesHandler() http.HandlerFunc { return fsSizesHandlerWith(defaultSizeLimits) }
+
+// fsSizesHandlerWith is fsSizesHandler with explicit walk limits (tests use
+// it instead of changing the shared defaults under running walkers).
+func fsSizesHandlerWith(lim sizeLimits) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(auditActionHeader, "fs.sizes")
 		in, err := queryPath(r)
@@ -297,7 +335,14 @@ func fsSizesHandler() http.HandlerFunc {
 					case <-ctx.Done():
 						continue
 					}
-					res, err := walkDirSize(ctx, p, defaultSizeLimits)
+					// Progress updates go out as the walk runs; only the final
+					// result is cached.
+					res, err := walkDirSizeProgress(ctx, p, lim, func(snap dirSizeResult) {
+						select {
+						case results <- snap:
+						case <-ctx.Done():
+						}
+					})
 					<-sizeWalkSem
 					if err != nil {
 						continue

@@ -42,3 +42,23 @@ describe('size state', () => {
     expect(formatDirSize({ state: 'pending' })).toBe('');
   });
 });
+
+describe('folder sizes still being counted', () => {
+  it('keeps a running total as it grows, then the final size', () => {
+    let m = initialSizes(['/big'], true);
+    m = applySizeEvent(m, { path: '/big', bytes: 1000, files: 10, partial: true, running: true });
+    expect(m.get('/big')).toEqual({ state: 'done', bytes: 1000, partial: true, running: true });
+    m = applySizeEvent(m, { path: '/big', bytes: 5000, files: 50, partial: false });
+    expect(m.get('/big')).toEqual({ state: 'done', bytes: 5000, partial: false });
+  });
+  it('shows a running total as "at least, still counting"', () => {
+    expect(formatDirSize({ state: 'done', bytes: 1536, partial: true, running: true })).toBe('≥ 1.5 KB…');
+    expect(formatDirSize({ state: 'done', bytes: 1536, partial: true })).toBe('≥ 1.5 KB');
+  });
+  it('keeps the last running total as a lower bound if the stream ends mid-count', () => {
+    let m = initialSizes(['/big'], true);
+    m = applySizeEvent(m, { path: '/big', bytes: 1000, files: 10, partial: true, running: true });
+    expect(settleSizes(m).get('/big')).toEqual({ state: 'done', bytes: 1000, partial: true });
+    expect(onStreamError(m, true).sizes.get('/big')).toEqual({ state: 'done', bytes: 1000, partial: true });
+  });
+});
