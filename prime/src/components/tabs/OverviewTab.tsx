@@ -22,6 +22,9 @@ export interface OverviewTabProps {
   // URL. Used by the container quick-link so we don't point at the
   // dashboard's own domain (see ContainersTab for the same reason).
   serverHost: string;
+  // Failed services the user dismissed as harmless, and undoing that.
+  isDismissed?: (unit: string) => boolean;
+  onRestore?: (unit: string) => void;
 }
 
 // Rewrite localhost upstreams to the current host so the link works when the
@@ -75,7 +78,15 @@ function storagePoolStats(disks: DashboardSnapshot['disks']) {
   };
 }
 
-export const OverviewTab = ({ snapshot, tt, onTunnelClick, activeServerId, serverHost }: OverviewTabProps) => {
+export const OverviewTab = ({
+  snapshot,
+  tt,
+  onTunnelClick,
+  activeServerId,
+  serverHost,
+  isDismissed,
+  onRestore,
+}: OverviewTabProps) => {
   const { system, headline: h } = snapshot;
   // Coalesce — some collectors may not have populated yet on cold start,
   // or may legitimately return nothing (e.g. tunnels without CF creds).
@@ -572,7 +583,9 @@ export const OverviewTab = ({ snapshot, tt, onTunnelClick, activeServerId, serve
             count={servicesActive + ' active'}
           />
           <Card className="overflow-hidden">
-            {servicesTop.map((s, i) => (
+            {servicesTop.map((s, i) => {
+              const dismissed = s.status === 'failed' && (isDismissed?.(s.name) ?? false);
+              return (
               <div
                 key={s.name}
                 className={cn(
@@ -580,9 +593,30 @@ export const OverviewTab = ({ snapshot, tt, onTunnelClick, activeServerId, serve
                   i > 0 && 'border-t',
                 )}
               >
-                <StatusDot status={s.status} pulse={isPositiveStatus(s.status)} />
+                <span className={cn(dismissed && 'opacity-40')}>
+                  <StatusDot status={s.status} pulse={isPositiveStatus(s.status)} />
+                </span>
                 <div className="min-w-0">
-                  <div className="text-xs font-medium truncate">{s.name}</div>
+                  <div className="flex items-center gap-1.5 text-xs font-medium">
+                    <span className={cn('truncate', dismissed && 'text-muted-foreground')}>{s.name}</span>
+                    {dismissed && (
+                      <>
+                        <span className="shrink-0 rounded border px-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                          dismissed
+                        </span>
+                        {onRestore && (
+                          <button
+                            type="button"
+                            onClick={() => onRestore(s.name)}
+                            title="Show this failure in the alert banner again"
+                            className="shrink-0 font-mono text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                          >
+                            restore
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                   <div className="text-[10px] text-muted-foreground/80 truncate">{s.description}</div>
                 </div>
                 <div className="text-right font-mono text-[10px] text-muted-foreground">
@@ -592,7 +626,8 @@ export const OverviewTab = ({ snapshot, tt, onTunnelClick, activeServerId, serve
                   {s.memMb ? s.memMb.toFixed(0) + 'M' : '—'}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </Card>
         </div>
       </div>

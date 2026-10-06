@@ -14,6 +14,7 @@ import {
   updateServer,
 } from './registry.js';
 import { createPinStore, validatePins } from './pins.js';
+import { createDismissalStore, validateDismissals } from './dismissals.js';
 import { saveResolvedIp } from './resolvedIp.js';
 import { targetResolver } from './targetIp.js';
 import {
@@ -51,6 +52,8 @@ ensureAuditSchema();
 ensureWhitelistSchema();
 const pinStore = createPinStore(db);
 pinStore.ensureSchema();
+const dismissalStore = createDismissalStore(db);
+dismissalStore.ensureSchema();
 startAuditRetention();
 
 // One-time backfill: existing users predate the role column. The bootstrap
@@ -383,11 +386,15 @@ viewerApi.put('/servers/:id', async (c) => {
 viewerApi.delete('/servers/:id', (c) => {
   const user = c.get('user');
   const id = c.req.param('id');
-  // Removing a server also drops the user's pinned folders for it; there
-  // are no foreign keys in this DB, so do it in the same transaction.
+  // Removing a server also drops the user's pinned folders and dismissed
+  // services for it; there are no foreign keys in this DB, so do it in the
+  // same transaction.
   const ok = db.transaction(() => {
     const removed = removeServer(user.id, id);
-    if (removed) pinStore.deleteForServer(user.id, id);
+    if (removed) {
+      pinStore.deleteForServer(user.id, id);
+      dismissalStore.deleteForServer(user.id, id);
+    }
     return removed;
   })();
   if (!ok) return c.json({ error: 'unknown server' }, 404);
@@ -412,6 +419,25 @@ viewerApi.put('/pins/:serverId', async (c) => {
   const v = validatePins(body);
   if (!v.ok) return c.json({ error: v.error }, 400);
   return c.json(pinStore.replace(user.id, serverId, v.pins));
+});
+
+// Dismissed failed services (see dismissals.ts) — /api/dismissals/:serverId.
+// A per-user view preference, so any signed-in role may set its own.
+viewerApi.get('/dismissals/:serverId', (c) => {
+  const user = c.get('user');
+  const serverId = c.req.param('serverId');
+  if (!getServer(user.id, serverId)) return c.json({ error: 'unknown server' }, 404);
+  return c.json(dismissalStore.list(user.id, serverId));
+});
+
+viewerApi.put('/dismissals/:serverId', async (c) => {
+  const user = c.get('user');
+  const serverId = c.req.param('serverId');
+  if (!getServer(user.id, serverId)) return c.json({ error: 'unknown server' }, 404);
+  const body = await c.req.json().catch(() => null);
+  const v = validateDismissals(body);
+  if (!v.ok) return c.json({ error: v.error }, 400);
+  return c.json(dismissalStore.replace(user.id, serverId, v.dismissals));
 });
 
 // ---------------------------------------------------------------------------

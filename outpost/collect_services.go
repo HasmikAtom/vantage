@@ -163,6 +163,7 @@ func collectServices(ctx context.Context) ([]Service, error) {
 				MemMb:       memMB,
 				User:        user,
 				Description: u.description,
+				FailedSince: failedSince(props, u.active),
 			}
 		}(i)
 	}
@@ -175,6 +176,20 @@ func collectServices(ctx context.Context) ([]Service, error) {
 		return out2[i].Name < out2[j].Name
 	})
 	return out2, nil
+}
+
+// failedSince is when a failed unit entered that state, in Unix ms, from
+// systemd's StateChangeTimestamp (µs; fetched with the other Unit
+// properties, so no extra call). 0 for healthy units or a missing value.
+func failedSince(props map[string]any, status string) int64 {
+	if status != "failed" {
+		return 0
+	}
+	us, ok := props["StateChangeTimestamp"].(float64)
+	if !ok || us <= 0 {
+		return 0
+	}
+	return int64(us) / 1000
 }
 
 type sdUnitTuple struct {

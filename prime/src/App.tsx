@@ -2,8 +2,9 @@ import * as React from 'react';
 import { fetchServers, type ServerSummary } from './api';
 import { useEventStream } from './hooks/useEventStream';
 import { useFloatingTooltip } from './hooks/useTooltip';
+import { useDismissals } from './hooks/useDismissals';
 import { hostFromServerURL } from './lib/utils';
-import type { DashboardSnapshot, Tunnel } from './types';
+import type { DashboardSnapshot, Service, Tunnel } from './types';
 import { AppHeader } from './components/AppHeader';
 import { TunnelDialog } from './components/TunnelDialog';
 // Tab components are code-split: each becomes its own chunk so the
@@ -12,6 +13,7 @@ import { TunnelDialog } from './components/TunnelDialog';
 // the standard workaround for React.lazy's hard requirement on default
 // exports — we keep the named exports at the source so unit tests and
 // future static imports still work.
+const NO_SERVICES: Service[] = [];
 const OverviewTab = React.lazy(() =>
   import('./components/tabs/OverviewTab').then((m) => ({ default: m.OverviewTab })),
 );
@@ -244,6 +246,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
     streamUrl,
     activeServerId,
   );
+  // Failed services the user dismissed as harmless (stored in gate).
+  const dismissals = useDismissals(activeServerId, snapshot?.services ?? NO_SERVICES);
 
   // serverHost is the hostname portion of the active server's registered
   // URL — used by container "open in browser" links so they target the
@@ -370,7 +374,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
         {/* Files is an app-style explorer: it fills the screen edge to edge. */}
         <main className={tab === 'files' ? 'p-3' : 'px-8 py-6'}>
           <StatusBar
-            services={snapshot.services ?? []}
+            failed={dismissals.alert}
+            {...(dismissals.supported ? { onDismiss: dismissals.dismiss } : {})}
             updates={snapshot.updates}
             onJumpToServices={jumpToOverview}
           />
@@ -382,6 +387,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
                 onTunnelClick={setTunnel}
                 activeServerId={activeServerId}
                 serverHost={serverHost}
+                isDismissed={dismissals.isDismissed}
+                {...(dismissals.supported ? { onRestore: dismissals.restore } : {})}
               />
             </React.Suspense>
           </TabsContent>

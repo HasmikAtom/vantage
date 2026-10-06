@@ -636,7 +636,8 @@
           "pid":         { "type": ["integer", "null"] },
           "memMb":       { "type": "number" },
           "user":        { "type": "string" },
-          "description": { "type": "string" }
+          "description": { "type": "string" },
+          "failedSince": { "type": "integer", "description": "Failed units only: when the unit entered the failed state, Unix ms. Omitted otherwise." }
         }
       },
       "Port": {

@@ -123,6 +123,9 @@ type Service struct {
 	MemMb       float64 `json:"memMb"`
 	User        string  `json:"user"`
 	Description string  `json:"description"`
+	// When a failed unit entered that state, Unix ms (0/omitted otherwise).
+	// The dashboard keys "dismissed" on it, so a new failure shows again.
+	FailedSince int64 `json:"failedSince,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

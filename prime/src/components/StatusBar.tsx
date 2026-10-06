@@ -5,9 +5,12 @@ import { AlertTriangleIcon } from './ui/icons';
 import { cn } from '@/lib/utils';
 
 interface Props {
-  services: Service[];
+  // Failed units to alert on (dismissed ones are already filtered out).
+  failed: Service[];
   updates: UpdateInfo;
   onJumpToServices: () => void;
+  // Dismiss a known-harmless failure; absent when gate can't store it.
+  onDismiss?: (s: Service) => void;
 }
 
 /**
@@ -20,11 +23,7 @@ interface Props {
  * the filter() and the JSX work. Parent must pass a stable onJumpToServices
  * (App.tsx wraps setTab in useCallback for this).
  */
-export const StatusBar = React.memo(function StatusBar({ services, updates, onJumpToServices }: Props) {
-  const failed = React.useMemo(
-    () => services.filter((s) => s.status === 'failed'),
-    [services],
-  );
+export const StatusBar = React.memo(function StatusBar({ failed, updates, onJumpToServices, onDismiss }: Props) {
   const hasUpdates =
     updates.upgradableCount > 0 || updates.rebootRequired || updates.securityCount > 0;
 
@@ -33,25 +32,36 @@ export const StatusBar = React.memo(function StatusBar({ services, updates, onJu
   return (
     <div className="space-y-2 mb-6">
       {failed.length > 0 && (
-        <button
-          onClick={onJumpToServices}
-          className={cn(
-            'w-full flex items-center gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2.5',
-            'text-left hover:bg-destructive/15 transition-colors',
-          )}
-        >
+        <div className="w-full flex items-center gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2.5">
           <AlertTriangleIcon size={16} className="text-destructive shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-xs font-semibold text-destructive">
               {failed.length} systemd unit{failed.length === 1 ? '' : 's'} failed
             </div>
-            <div className="font-mono text-[11px] text-destructive/80 truncate mt-0.5">
-              {failed.map((s) => s.name).slice(0, 5).join('  ·  ')}
-              {failed.length > 5 ? `  · +${failed.length - 5} more` : ''}
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px] text-destructive/80">
+              {failed.slice(0, 5).map((s) => (
+                <span key={s.name} className="inline-flex items-center gap-1">
+                  {s.name}
+                  {onDismiss && (
+                    <button
+                      type="button"
+                      onClick={() => onDismiss(s)}
+                      title={`Dismiss ${s.name}: hidden until it recovers or fails again`}
+                      aria-label={`Dismiss ${s.name}`}
+                      className="rounded px-1 leading-none text-destructive/60 hover:bg-destructive/20 hover:text-destructive"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </span>
+              ))}
+              {failed.length > 5 && <span>+{failed.length - 5} more</span>}
             </div>
           </div>
-          <Badge variant="danger">jump to services</Badge>
-        </button>
+          <button type="button" onClick={onJumpToServices} className={cn('shrink-0 rounded-md transition-opacity hover:opacity-80')}>
+            <Badge variant="danger">jump to services</Badge>
+          </button>
+        </div>
       )}
 
       {hasUpdates && (

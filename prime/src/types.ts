@@ -409,6 +409,9 @@ export interface Service {
   memMb: number;
   user: string;
   description: string;
+  // Failed units only: when the unit entered the failed state (Unix ms).
+  // Absent from older outposts.
+  failedSince?: number;
 }
 
 export interface Port {

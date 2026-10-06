@@ -18,6 +18,7 @@ import type {
   StackSummary,
   StackUpdateRequest,
 } from './types';
+import type { Dismissal } from './lib/dismissals';
 
 const BASE = '/api';
 
@@ -639,6 +640,19 @@ export function savePins(serverId: string, pins: FsPin[]): Promise<FsPin[]> {
   return apiFetch<FsPin[]>(`${BASE}/pins/${encodeURIComponent(serverId)}`, {
     method: 'PUT',
     json: { pins },
+  });
+}
+
+// -- Dismissed failed services (per user + server, stored by gate) --------
+
+export function fetchDismissals(serverId: string): Promise<Dismissal[]> {
+  return apiFetch<Dismissal[]>(`${BASE}/dismissals/${encodeURIComponent(serverId)}`);
+}
+
+export function saveDismissals(serverId: string, dismissals: Dismissal[]): Promise<Dismissal[]> {
+  return apiFetch<Dismissal[]>(`${BASE}/dismissals/${encodeURIComponent(serverId)}`, {
+    method: 'PUT',
+    json: { dismissals },
   });
 }
 
