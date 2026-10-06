@@ -77,6 +77,10 @@ help:
 	@echo "  make prime-dev-build / prime-prod-build"
 	@echo
 	@echo "Housekeeping:"
+	@echo "  make update           update this machine's stack(s) to the newest release"
+	@echo "                         (checks keys first; TAG=vX.Y.Z to pin or roll back,"
+	@echo "                          STACK=outpost|prime|prod to choose)"
+	@echo "  make update-check     only check keys and .env, change nothing"
 	@echo "  make ps               list dev + prod containers"
 	@echo "  make clean            stop both stacks, remove their images + volumes"
 	@echo
@@ -216,6 +220,15 @@ prime-prod-build:
 # ---------------------------------------------------------------------------
 # misc
 # ---------------------------------------------------------------------------
+.PHONY: update update-check
+# Move a deployment checkout to the newest release tag and rebuild the
+# stack(s) running here, after checking the keys (see scripts/update.sh).
+update:
+	@bash scripts/update.sh
+
+update-check:
+	@bash scripts/update.sh --check-only
+
 .PHONY: ps clean
 ps:
 	@echo "== dev =="

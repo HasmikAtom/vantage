@@ -179,6 +179,30 @@ Repeat for each outpost. The header's server switcher lists every
 registered outpost; each one carries its own Cloudflare tunnel
 credentials, scoped to that box.
 
+### 5. Updating
+
+On each machine, from its Vantage checkout:
+
+```sh
+make update-check   # check the keys in .env, change nothing
+make update         # move to the newest release and rebuild what runs here
+```
+
+`make update` works out which stack runs on the machine (outpost,
+prime, or prod), checks the keys that stack needs, and stops before
+changing anything if a required one is missing or malformed, printing
+the command to generate it. It also warns if `.env` is readable by other
+users or `VANTAGE_ENCRYPTION_KEY` is unset. Then it checks out the newest
+release tag, rebuilds, and confirms the new version is running.
+
+- `TAG=v1.4.10 make update` pins a release, which is also how you roll back.
+- `STACK=outpost make update` chooses the stack when nothing is running yet.
+- It's meant for deployment checkouts sitting on a release tag; on a
+  branch (a development copy) or with local changes it refuses.
+- If the repo is private, set the clone's SSH key once so the update can
+  fetch, e.g.
+  `git config core.sshCommand "ssh -i ~/.ssh/vantage_deploy -o IdentitiesOnly=yes"`.
+
 ## Cloudflare tunnels (optional)
 
 Vantage reads info about tunnels you already have running — it doesn't
