@@ -155,6 +155,25 @@ check_keys() {
 check_keys
 [ "$MODE" = check ] && exit 0
 
+# Containers of each stack, and whether they all run a given version.
+containers_of() {
+  case $1 in
+    outpost) echo vantage-outpost ;;
+    prime) echo "vantage-gate vantage-prime" ;;
+    prod) echo "vantage-gate-prod vantage-outpost vantage-prime" ;;
+  esac
+}
+
+running_version() { # running_version <version>: all containers up on it?
+  local s c state
+  for s in $STACKS; do
+    for c in $(containers_of "$s"); do
+      state=$(docker inspect -f '{{.State.Running}} {{.Config.Image}}' "$c" 2>/dev/null || true)
+      [[ "$state" == "true "*":$1" ]] || return 1
+    done
+  done
+}
+
 # --- code --------------------------------------------------------------------
 
 git rev-parse --git-dir >/dev/null 2>&1 || die "Not a git checkout; can't update the code."
@@ -174,24 +193,23 @@ TARGET=${TAG:-$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1)}
 [ -n "$TARGET" ] || die "No release tags (v*) found."
 git rev-parse -q --verify "refs/tags/$TARGET" >/dev/null || die "Release $TARGET doesn't exist."
 
-if [ "$PREV" = "$TARGET" ] && [ "${FORCE:-}" != 1 ]; then
-  ok "Already on $TARGET: up to date. (FORCE=1 make update rebuilds anyway.)"
+TARGET_VERSION=$(git show "$TARGET:VERSION" 2>/dev/null || echo "$TARGET")
+# Up to date only if the checkout is on the release AND the containers run
+# it (a checkout moved by hand still needs its rebuild).
+if [ "$PREV" = "$TARGET" ] && [ "${FORCE:-}" != 1 ] && running_version "$TARGET_VERSION"; then
+  ok "Already on $TARGET and running it: up to date. (FORCE=1 make update rebuilds anyway.)"
   exit 0
 fi
 
-info "Updating $PREV → $TARGET"
+if [ "$PREV" = "$TARGET" ]; then
+  info "Checkout is on $TARGET but the containers aren't running it: rebuilding"
+else
+  info "Updating $PREV → $TARGET"
+fi
 git -c advice.detachedHead=false checkout --quiet "$TARGET"
 VERSION=$(cat VERSION 2>/dev/null || echo "$TARGET")
 
 # --- rebuild + verify --------------------------------------------------------
-
-containers_of() {
-  case $1 in
-    outpost) echo vantage-outpost ;;
-    prime) echo "vantage-gate vantage-prime" ;;
-    prod) echo "vantage-gate-prod vantage-outpost vantage-prime" ;;
-  esac
-}
 
 for s in $STACKS; do
   info ""

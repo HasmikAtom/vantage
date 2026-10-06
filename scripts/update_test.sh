@@ -40,8 +40,12 @@ echo "docker \$*" >> "$LOG"
 case "\$1" in
   ps)   # docker ps -a -q --filter label=com.docker.compose.project=<p>
         for p in \${STUB_PROJECTS:-}; do [[ "\$*" == *"project=\$p"* ]] && echo cid-\$p; done ;;
-  inspect)  # running + image tag of the freshly built version
-        echo "true vantage-x:\$(cat VERSION 2>/dev/null)" ;;
+  inspect)  # running + image tag: STUB_RUNNING (an older build) until make rebuilds
+        if [ -n "\${STUB_RUNNING:-}" ] && ! grep -q "^make" "$LOG"; then
+          echo "true vantage-x:\$STUB_RUNNING"
+        else
+          echo "true vantage-x:\$(cat VERSION 2>/dev/null)"
+        fi ;;
 esac
 STUB
   cat > "$TMP/$name/bin/make" <<STUB
@@ -56,7 +60,7 @@ writeenv() { printf '%s\n' "$@" > "$W/.env"; chmod 600 "$W/.env"; }
 
 # run <args...>: runs the script in $W; sets OUT and RC.
 run() {
-  OUT=$(cd "$W" && env -i HOME="$HOME" PATH="$PATH_STUB" STUB_PROJECTS="${STUB_PROJECTS:-}" ${EXTRA_ENV:-} bash scripts/update.sh "$@" 2>&1)
+  OUT=$(cd "$W" && env -i HOME="$HOME" PATH="$PATH_STUB" STUB_PROJECTS="${STUB_PROJECTS:-}" STUB_RUNNING="${STUB_RUNNING:-}" ${EXTRA_ENV:-} bash scripts/update.sh "$@" 2>&1)
   RC=$?
 }
 
@@ -118,6 +122,17 @@ run
 check "up to date succeeds"            test "$RC" -eq 0
 check "says it is up to date"          has "up to date"
 check "no rebuild when up to date"     not called "make"
+
+# 6b. checkout already on the newest tag (moved by hand) but the containers
+#     still run the previous build → rebuild instead of "up to date"
+setup stale; STUB_PROJECTS=vantage-outpost; STUB_RUNNING=1.0.0
+writeenv "VANTAGE_OUTPOST_TOKEN=$TOK" "VANTAGE_ENCRYPTION_KEY=$K32"
+(cd "$W" && git checkout -q v1.1.0 && cp "$SCRIPT" scripts/update.sh)
+run
+STUB_RUNNING=
+check "stale containers: succeeds"     test "$RC" -eq 0
+check "stale containers: rebuilds"     called "make outpost-up"
+check "stale containers: not 'up to date'" not has "up to date"
 
 # 7. TAG pins a specific release (rollback)
 setup pin; STUB_PROJECTS=vantage-outpost
