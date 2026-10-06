@@ -201,6 +201,16 @@ if [ "$PREV" = "$TARGET" ] && [ "${FORCE:-}" != 1 ] && running_version "$TARGET_
   exit 0
 fi
 
+# Roll back to what the containers ran before, which differs from the
+# checkout when that was moved by hand.
+ROLLBACK=$PREV
+first=$(containers_of "${STACKS%% *}" | cut -d' ' -f1)
+ran=$(docker inspect -f '{{.Config.Image}}' "$first" 2>/dev/null || true)
+ran=${ran##*:}
+if [ -n "$ran" ] && [ "v$ran" != "$TARGET" ] && git rev-parse -q --verify "refs/tags/v$ran" >/dev/null; then
+  ROLLBACK="v$ran"
+fi
+
 if [ "$PREV" = "$TARGET" ]; then
   info "Checkout is on $TARGET but the containers aren't running it: rebuilding"
 else
@@ -239,8 +249,8 @@ done
 info ""
 if [ $FAILED = 1 ]; then
   err "Update to $TARGET finished with problems."
-  info "Roll back: TAG=$PREV make update"
+  info "Roll back: TAG=$ROLLBACK make update"
   exit 1
 fi
 ok "Updated to $TARGET."
-info "Roll back if needed: TAG=$PREV make update"
+info "Roll back if needed: TAG=$ROLLBACK make update"

@@ -133,6 +133,7 @@ STUB_RUNNING=
 check "stale containers: succeeds"     test "$RC" -eq 0
 check "stale containers: rebuilds"     called "make outpost-up"
 check "stale containers: not 'up to date'" not has "up to date"
+check "stale containers: rollback names the old running version" has "TAG=v1.0.0 make update"
 
 # 7. TAG pins a specific release (rollback)
 setup pin; STUB_PROJECTS=vantage-outpost

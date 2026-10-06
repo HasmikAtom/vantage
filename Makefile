@@ -183,8 +183,17 @@ prime-ps:
 outpost-up:
 	$(COMPOSE_OUTPOST) up --build -d
 	@echo
-	@echo "Outpost up. Register it in the dashboard's Servers panel:"
-	@echo "  URL: http://$(or $(VANTAGE_OUTPOST_BIND),0.0.0.0):$(or $(VANTAGE_OUTPOST_PORT),8095)"
+	@# Show where it really listens (docker port), not a guess from make's
+	@# variables: VANTAGE_OUTPOST_BIND usually lives in .env, which make
+	@# doesn't read.
+	@addr=$$($(DOCKER) port vantage-outpost 8080/tcp 2>/dev/null | grep -v '^\[' | head -n1); \
+	echo "Outpost up. Register it in the dashboard's Servers panel:"; \
+	echo "  URL: http://$${addr:-<not published>}"; \
+	case "$$addr" in 0.0.0.0:*) \
+	  echo "  ! It listens on ALL interfaces, including any public IP. Set"; \
+	  echo "    VANTAGE_OUTPOST_BIND in .env to a LAN / Tailscale address unless"; \
+	  echo "    a firewall in front blocks this port." ;; \
+	esac
 
 outpost-down:
 	$(COMPOSE_OUTPOST) down
