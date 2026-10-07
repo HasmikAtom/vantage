@@ -45,14 +45,11 @@ server {
     #
     # If you self-host the fonts in a follow-up, drop the two
     # fonts.g*.com entries.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-3Z8AaOvmmqasb6QB3388DSjiGUeRpW1JXLiUMl7Kq3g='; style-src 'self' 'unsafe-inline' fonts.googleapis.com; font-src 'self' fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'" always;
-    add_header X-Frame-Options DENY always;
-    add_header X-Content-Type-Options nosniff always;
-    add_header Referrer-Policy strict-origin-when-cross-origin always;
-    # Permissions-Policy: explicitly turn off browser features we don't
-    # use. Adds defence-in-depth against XSS that tries to grab camera /
-    # mic / geolocation. Adjust if the SPA ever needs any of these.
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+    # Permissions-Policy turns off browser features we don't use (camera,
+    # mic, geolocation…): defence-in-depth against XSS. All five headers
+    # live in one snippet so locations that add their own headers can
+    # include it again.
+    include /etc/nginx/snippets/security-headers.conf;
 
     # Docker's embedded DNS — required for runtime upstream resolution below.
     # We resolve `outpost` at request time (via $outpost_upstream) so nginx
@@ -308,9 +305,28 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # The page names the current build's assets, so browsers must revalidate
+    # it on every load (cheap: usually a 304). Cached, an old copy asks for
+    # the previous build's chunks after a release. "/" and every app route
+    # reach this through the index / try_files fallback above.
+    location = /index.html {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # Built assets have content-hashed names, so they can be cached for good.
+    # A name that's gone (an old build's chunk) is a real 404: falling back
+    # to index.html served HTML for a .js and broke lazy-loaded tabs. No
+    # "always" on Cache-Control, so a 404 isn't cached for a year.
+    location /assets/ {
+        try_files $uri =404;
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
     location = /healthz {
         access_log off;
-        add_header Content-Type text/plain;
+        default_type text/plain;  # not add_header, which would drop the security headers
         return 200 "ok\n";
     }
 }

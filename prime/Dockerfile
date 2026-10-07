@@ -25,6 +25,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # $variables ($host, $remote_addr, …) are left alone because they are not env
 # vars on the container.
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
