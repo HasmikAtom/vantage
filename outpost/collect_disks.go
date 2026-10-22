@@ -483,8 +483,8 @@ func scoreSmart(sm *smartctlOutput, d *SmartDetail) ScrutinyScore {
 				bump("warning", "UDMA_CRC_Error_Count: "+a.RawString+" (cable/connector likely)")
 			}
 		case "Command_Timeout":
-			if a.RawValue > 100 {
-				bump("warning", "Command_Timeout: "+a.RawString)
+			if n := commandTimeoutCount(a.RawValue); n > 100 {
+				bump("warning", "Command_Timeout: "+strconv.FormatUint(n, 10)+" (raw "+a.RawString+")")
 			}
 		case "Spin_Retry_Count":
 			if a.RawValue > 0 {
@@ -524,4 +524,20 @@ func scoreSmart(sm *smartctlOutput, d *SmartDetail) ScrutinyScore {
 	}
 
 	return score
+}
+
+// commandTimeoutCount decodes SMART attribute 188. Seagate packs three
+// 16-bit counters into its 48-bit raw value, so a drive with 3 lifetime
+// timeouts reports 12885098499 (0x0003_0003_0003). A raw value that fits in
+// 16 bits is a plain count (other vendors); otherwise take the largest of the
+// three words.
+func commandTimeoutCount(raw uint64) uint64 {
+	if raw <= 0xFFFF {
+		return raw
+	}
+	var n uint64
+	for shift := 0; shift < 48; shift += 16 {
+		n = max(n, (raw>>shift)&0xFFFF)
+	}
+	return n
 }
