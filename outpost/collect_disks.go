@@ -151,7 +151,9 @@ type smartctlOutput struct {
 	Temperature struct {
 		Current int `json:"current"`
 	} `json:"temperature"`
-	SmartStatus struct {
+	// nil when the device reports no health status at all (virtual disks:
+	// VPS/QEMU "scsi" devices answer smartctl but have no SMART).
+	SmartStatus *struct {
 		Passed bool `json:"passed"`
 	} `json:"smart_status"`
 	PowerOnTime struct {
@@ -212,6 +214,12 @@ func runSmartctl(ctx context.Context, devPath string) (*smartctlOutput, error) {
 		}
 		return nil, fmt.Errorf("smartctl %s: empty output", devPath)
 	}
+	return parseSmartctl(devPath, out)
+}
+
+// parseSmartctl turns `smartctl -aj` output into a usable snapshot, or an
+// error when the device can't be judged.
+func parseSmartctl(devPath string, out []byte) (*smartctlOutput, error) {
 	var parsed smartctlOutput
 	if jerr := json.Unmarshal(out, &parsed); jerr != nil {
 		return nil, fmt.Errorf("smartctl %s: parse: %w", devPath, jerr)
@@ -227,6 +235,11 @@ func runSmartctl(ctx context.Context, devPath string) (*smartctlOutput, error) {
 			}
 		}
 		return nil, fmt.Errorf("smartctl %s: %s", devPath, msg)
+	}
+	// No smart_status means there is nothing to judge, not a failed drive.
+	// Report it like an unreadable device so the disk shows as "unknown".
+	if parsed.SmartStatus == nil {
+		return nil, fmt.Errorf("smartctl %s: no SMART health status", devPath)
 	}
 	return &parsed, nil
 }
@@ -275,7 +288,7 @@ func collectDisks(ctx context.Context) ([]Disk, error) {
 			disk.Health = healthFromSmart(sm)
 			disk.PowerOnHours = sm.PowerOnTime.Hours
 			disk.Smart = Smart{
-				Passed:      sm.SmartStatus.Passed,
+				Passed:      smartPassed(sm),
 				Reallocated: nvmeOrSataReallocated(sm),
 				Pending:     nvmeOrSataPending(sm),
 				LifeLeft:    nvmeOrSataLifeLeft(sm),
@@ -293,8 +306,14 @@ func collectDisks(ctx context.Context) ([]Disk, error) {
 	return out, nil
 }
 
+// smartPassed is the drive's own pass bit; false when it reported none
+// (runSmartctl already turns that case into an error).
+func smartPassed(sm *smartctlOutput) bool {
+	return sm.SmartStatus != nil && sm.SmartStatus.Passed
+}
+
 func healthFromSmart(sm *smartctlOutput) string {
-	if !sm.SmartStatus.Passed {
+	if !smartPassed(sm) {
 		return "failing"
 	}
 	if sm.NvmeSmartHealthInformationLog.AvailableSpare > 0 &&
@@ -446,7 +465,7 @@ func scoreSmart(sm *smartctlOutput, d *SmartDetail) ScrutinyScore {
 	}
 
 	// Universal: drive's own pass bit overrules everything.
-	if !sm.SmartStatus.Passed {
+	if !smartPassed(sm) {
 		bump("failed", "Drive SMART self-assessment: FAIL")
 	}
 
